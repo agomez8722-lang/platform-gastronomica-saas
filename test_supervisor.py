@@ -584,6 +584,33 @@ def main():
                 archivos
             )
 
+    def test_ejecutar_sandbox_propuesta_valida(self):
+        archivos = {
+            "main.py": (
+                "def main():\n"
+                "    return 42\n"
+            ),
+            "test_proyecto.py": (
+                "import unittest\n"
+                "import main\n"
+                "\n"
+                "class TestMain(unittest.TestCase):\n"
+                "    def test_main(self):\n"
+                "        self.assertEqual(main.main(), 42)\n"
+            ),
+        }
+
+        resultado, detalle = (
+            self.agent.ejecutar_sandbox(
+                archivos
+            )
+        )
+
+        self.assertTrue(
+            resultado,
+            detalle,
+        )
+
     # ================================================================
     # SELECCIÓN DE MODELOS
     # ================================================================
