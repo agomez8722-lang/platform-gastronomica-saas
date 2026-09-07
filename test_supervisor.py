@@ -78,6 +78,50 @@ class TestSupremeTDDAgent(unittest.TestCase):
             self.orders.exists()
         )
 
+    def test_copiar_soporte_excluye_archivos_generados(self):
+        self.target.mkdir(parents=True, exist_ok=True)
+
+        (self.target / "main.py").write_text(
+            "print('main')",
+            encoding="utf-8",
+        )
+
+        (self.target / "test_proyecto.py").write_text(
+            "print('tests')",
+            encoding="utf-8",
+        )
+
+        (self.target / "historico.json").write_text(
+            '{"registros":[]}',
+            encoding="utf-8",
+        )
+
+        (self.target / "soporte.txt").write_text(
+            "archivo auxiliar",
+            encoding="utf-8",
+        )
+
+        with tempfile.TemporaryDirectory() as sandbox_dir:
+            sandbox = Path(sandbox_dir)
+
+            self.agent.copiar_soporte(sandbox)
+
+            self.assertFalse(
+                (sandbox / "main.py").exists()
+            )
+
+            self.assertFalse(
+                (sandbox / "test_proyecto.py").exists()
+            )
+
+            self.assertFalse(
+                (sandbox / "historico.json").exists()
+            )
+
+            self.assertTrue(
+                (sandbox / "soporte.txt").exists()
+            )
+
     def test_python_es_el_interprete_actual(self):
         import sys
 

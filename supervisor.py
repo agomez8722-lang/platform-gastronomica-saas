@@ -1705,8 +1705,6 @@ DEVUELVE ÚNICAMENTE JSON:
             "historico.json",
         }
 
-        excluidos = set()
-
         for root, dirs, files in os.walk(
             self.target_path
         ):
