@@ -1,0 +1,9 @@
+.aider*
+venv/
+__pycache__/
+*.pyc
+backups/
+*.bak
+*.backup*
+historico.json
+tu_archivo
