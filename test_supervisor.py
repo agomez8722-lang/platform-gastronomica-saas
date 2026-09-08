@@ -578,6 +578,110 @@ def sumar(a, b):
             "subprocess",
         )
 
+    def test_codigo_peligroso_con_import_os(self):
+        tree = self.agent.validar_python(
+            "import os\nos.system('echo peligroso')",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "system",
+        )
+
+
+    def test_codigo_peligroso_con_import_subprocess_alias(self):
+        tree = self.agent.validar_python(
+            "import subprocess as sp\nsp.run(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_subprocess_run(self):
+        tree = self.agent.validar_python(
+            "import subprocess\nsubprocess.run(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_subprocess_run(self):
+        tree = self.agent.validar_python(
+            "import subprocess\nsubprocess.run(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_subprocess_popen(self):
+        tree = self.agent.validar_python(
+            "import subprocess\nsubprocess.Popen(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_os_popen(self):
+        tree = self.agent.validar_python(
+            "import os\nos.popen('echo peligroso')",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "popen",
+        )
+
+
     def test_os_system_es_peligroso(self):
         tree = self.agent.validar_python(
             "import os\nos.system('ls')",
