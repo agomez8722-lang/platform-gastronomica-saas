@@ -57,6 +57,31 @@ class TestSupremeTDDAgent(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_ejecutar_sandbox_test_fallido_es_rechazado(self):
+        archivos = {
+            "main.py": (
+                "def main():\n"
+                "    pass\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
+            "test_proyecto.py": (
+                "import unittest\n\n"
+                "class TestFallo(unittest.TestCase):\n"
+                "    def test_falla(self):\n"
+                "        self.assertEqual(1, 2)\n"
+            ),
+        }
+
+        aprobado, detalle = (
+            self.agent.ejecutar_sandbox(archivos)
+        )
+
+        self.assertIn("FAILED", detalle)
+        self.assertFalse(aprobado)
+        self.assertIn("FAILED", detalle)
+
+
     def test_ejecutar_sandbox_timeout(self):
         archivos = {
             "main.py": (
