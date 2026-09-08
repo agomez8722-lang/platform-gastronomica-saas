@@ -890,6 +890,23 @@ class SupremeTDDAgent:
 
                     return node.module
 
+            if isinstance(
+                node,
+                ast.Assign,
+            ):
+
+                if isinstance(
+                    node.value,
+                    ast.Attribute,
+                ):
+
+                    if (
+                        node.value.attr
+                        in atributos_prohibidos
+                    ):
+
+                        return node.value.attr
+
         return None
 
     # ========================================================================
