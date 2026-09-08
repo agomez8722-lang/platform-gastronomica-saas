@@ -57,6 +57,36 @@ class TestSupremeTDDAgent(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_ejecutar_sandbox_timeout(self):
+        archivos = {
+            "main.py": (
+                "def main():\n"
+                "    pass\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
+            "test_proyecto.py": (
+                "import time\n"
+                "import unittest\n\n"
+                "class TestTimeout(unittest.TestCase):\n"
+                "    def test_timeout(self):\n"
+                "        time.sleep(5)\n"
+            ),
+        }
+
+        self.agent.config.sandbox_timeout = 1
+
+        aprobado, detalle = (
+            self.agent.ejecutar_sandbox(archivos)
+        )
+
+        self.assertFalse(aprobado)
+
+        self.assertIn(
+            "tiempo máximo",
+            detalle,
+        )
+
     # ================================================================
     # CONFIGURACIÓN / ENTORNO
     # ================================================================
