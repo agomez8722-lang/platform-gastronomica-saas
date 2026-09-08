@@ -89,6 +89,43 @@ class TestSupremeTDDAgent(unittest.TestCase):
             "VERSION = 1\n",
         )
 
+    def test_consolidar_error_rollback_archivo_nuevo(self):
+        main = self.target / "main.py"
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nuevo.py": "NUEVO = True\n",
+            "archivo_invalido.txt": "contenido\n",
+        }
+
+        original = self.agent.ruta_segura
+
+        def ruta_segura_fallida(relativa):
+            if relativa == "archivo_invalido.txt":
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original(relativa)
+
+        self.agent.ruta_segura = ruta_segura_fallida
+
+        with self.assertRaises(RuntimeError):
+            self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            (self.target / "nuevo.py").exists()
+        )
+
     def test_consolidar_varios_archivos(self):
         main = self.target / "main.py"
         config = self.target / "config.py"
