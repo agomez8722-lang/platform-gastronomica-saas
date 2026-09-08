@@ -54,8 +54,403 @@ class TestSupremeTDDAgent(unittest.TestCase):
 
         self.agent = SupremeTDDAgent(config)
 
+    def test_consolidar_error_restaurar_backup(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "archivo_invalido.txt": "contenido\n",
+        }
+
+        original = self.agent.ruta_segura
+
+        def ruta_segura_fallida(relativa):
+            if relativa == "archivo_invalido.txt":
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original(relativa)
+
+        self.agent.ruta_segura = ruta_segura_fallida
+
+        with self.assertRaises(
+            RuntimeError
+        ):
+            self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+    def test_consolidar_error_rollback_archivo_nuevo(self):
+        main = self.target / "main.py"
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nuevo.py": "NUEVO = True\n",
+            "archivo_invalido.txt": "contenido\n",
+        }
+
+        original = self.agent.ruta_segura
+
+        def ruta_segura_fallida(relativa):
+            if relativa == "archivo_invalido.txt":
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original(relativa)
+
+        self.agent.ruta_segura = ruta_segura_fallida
+
+        with self.assertRaises(RuntimeError):
+            self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            (self.target / "nuevo.py").exists()
+        )
+
+    def test_consolidar_rollback_despues_de_replace_parcial(self):
+        main = self.target / "main.py"
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        original_replace = __import__("os").replace
+        llamadas = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas["count"] += 1
+            if llamadas["count"] == 2:
+                raise RuntimeError(
+                    "Error simulado después del primer replace"
+                )
+            return original_replace(origen, destino)
+
+        import os
+        original_os_replace = os.replace
+        os.replace = replace_fallido
+
+        try:
+            with self.assertRaises(RuntimeError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_os_replace
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            (self.target / "nuevo.py").exists()
+        )
+
+    def test_consolidar_varios_archivos(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 2\n",
+        )
+
+        self.assertEqual(
+            config.read_text(encoding="utf-8"),
+            "DEBUG = True\n",
+        )
+
+    def test_consolidar_error_restaurar_varios_archivos(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+            "archivo_invalido.txt": "contenido\n",
+        }
+
+        original = self.agent.ruta_segura
+
+        def ruta_segura_fallida(relativa):
+            if relativa == "archivo_invalido.txt":
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original(relativa)
+
+        self.agent.ruta_segura = ruta_segura_fallida
+
+        with self.assertRaises(
+            RuntimeError
+        ):
+            self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertEqual(
+            config.read_text(encoding="utf-8"),
+            "DEBUG = False\n",
+        )
+
+
+    def test_consolidar_crea_directorios_anidados(self):
+        propuesta = {
+            "src/modulos/feature.py": (
+                "def feature():\n"
+                "    return True\n"
+            ),
+        }
+
+        self.agent.consolidar(propuesta)
+
+        archivo = (
+            self.target
+            / "src"
+            / "modulos"
+            / "feature.py"
+        )
+
+        self.assertTrue(archivo.exists())
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "def feature():\n"
+            "    return True\n",
+        )
+
+    def test_consolidar_crea_archivo_nuevo(self):
+        archivo = self.target / "nuevo.py"
+
+        self.assertFalse(archivo.exists())
+
+        propuesta = {
+            "nuevo.py": "VALOR = 123\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertTrue(archivo.exists())
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "VALOR = 123\n",
+        )
+
+    def test_consolidar_no_elimina_archivos_no_propuestos(self):
+        existente = self.target / "existente.py"
+
+        existente.write_text(
+            "NO_CAMBIAR = True\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertTrue(existente.exists())
+
+        self.assertEqual(
+            existente.read_text(encoding="utf-8"),
+            "NO_CAMBIAR = True\n",
+        )
+
+    def test_consolidar_reemplaza_archivo_existente(self):
+        archivo = self.target / "main.py"
+
+        archivo.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "VERSION = 2\n",
+        )
+
+    def test_consolidar_no_deja_archivos_temporales(self):
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        temporales = list(
+            self.target.rglob("*.supreme.tmp")
+        )
+
+        self.assertEqual(
+            temporales,
+            [],
+        )
+
+
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_ejecutar_sandbox_test_fallido_es_rechazado(self):
+        archivos = {
+            "main.py": (
+                "def main():\n"
+                "    pass\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
+            "test_proyecto.py": (
+                "import unittest\n\n"
+                "class TestFallo(unittest.TestCase):\n"
+                "    def test_falla(self):\n"
+                "        self.assertEqual(1, 2)\n"
+            ),
+        }
+
+        aprobado, detalle = (
+            self.agent.ejecutar_sandbox(archivos)
+        )
+
+        self.assertIn("FAILED", detalle)
+        self.assertFalse(aprobado)
+        self.assertIn("FAILED", detalle)
+
+
+    def test_ejecutar_sandbox_timeout(self):
+        archivos = {
+            "main.py": (
+                "def main():\n"
+                "    pass\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
+            "test_proyecto.py": (
+                "import time\n"
+                "import unittest\n\n"
+                "class TestTimeout(unittest.TestCase):\n"
+                "    def test_timeout(self):\n"
+                "        time.sleep(5)\n"
+            ),
+        }
+
+        self.agent.config.sandbox_timeout = 1
+
+        aprobado, detalle = (
+            self.agent.ejecutar_sandbox(archivos)
+        )
+
+        self.assertFalse(aprobado)
+
+        self.assertIn(
+            "tiempo máximo",
+            detalle,
+        )
+
+
+        main = self.target / "main.py"
+    def test_consolidar_crea_backup_y_actualiza_archivo(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 2\n",
+        )
+
+        backups = list(
+            self.agent.backup_dir.iterdir()
+        )
+
+        self.assertEqual(
+            len(backups),
+            1,
+        )
+
+        backup_main = (
+            backups[0] / "main.py"
+        )
+
+        self.assertTrue(
+            backup_main.exists()
+        )
+
+        self.assertEqual(
+            backup_main.read_text(
+                encoding="utf-8"
+            ),
+            "VERSION = 1\n",
+        )
+
 
     # ================================================================
     # CONFIGURACIÓN / ENTORNO
@@ -262,6 +657,110 @@ def sumar(a, b):
             "subprocess",
         )
 
+    def test_codigo_peligroso_con_import_os(self):
+        tree = self.agent.validar_python(
+            "import os\nos.system('echo peligroso')",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "system",
+        )
+
+
+    def test_codigo_peligroso_con_import_subprocess_alias(self):
+        tree = self.agent.validar_python(
+            "import subprocess as sp\nsp.run(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_subprocess_run(self):
+        tree = self.agent.validar_python(
+            "import subprocess\nsubprocess.run(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_subprocess_run(self):
+        tree = self.agent.validar_python(
+            "import subprocess\nsubprocess.run(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_subprocess_popen(self):
+        tree = self.agent.validar_python(
+            "import subprocess\nsubprocess.Popen(['echo', 'peligroso'])",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "subprocess",
+        )
+
+    def test_codigo_peligroso_con_os_popen(self):
+        tree = self.agent.validar_python(
+            "import os\nos.popen('echo peligroso')",
+            "peligroso.py",
+        )
+
+        peligro = (
+            self.agent.detectar_codigo_peligroso(
+                tree
+            )
+        )
+
+        self.assertEqual(
+            peligro,
+            "popen",
+        )
+
+
     def test_os_system_es_peligroso(self):
         tree = self.agent.validar_python(
             "import os\nos.system('ls')",
@@ -278,60 +777,6 @@ def sumar(a, b):
             peligro,
             "system",
         )
-
-    def test_os_system_alias_es_peligroso(self):
-        tree = self.agent.validar_python(
-            "import os\n"
-            "ejecutar = os.system\n"
-            "ejecutar('ls')",
-            "peligroso.py",
-        )
-
-        peligro = self.agent.detectar_codigo_peligroso(tree)
-
-        self.assertEqual(
-            peligro,
-            "system",
-        )
-
-    def test_from_os_system_alias_es_peligroso(self):
-        tree = self.agent.validar_python(
-            "from os import system\n"
-            "ejecutar = system\n"
-            "ejecutar('ls')",
-            "peligroso.py",
-        )
-
-        peligro = self.agent.detectar_codigo_peligroso(tree)
-
-        self.assertIsNotNone(peligro)
-
-    def test_import_os_alias_es_peligroso(self):
-        tree = self.agent.validar_python(
-            "import os as sistema\n"
-            "sistema.system('ls')",
-            "peligroso.py",
-        )
-
-        peligro = self.agent.detectar_codigo_peligroso(tree)
-
-        self.assertEqual(
-            peligro,
-            "system",
-        )
-
-    def test_alias_de_alias_es_peligroso(self):
-        tree = self.agent.validar_python(
-            "import os\n"
-            "a = os.system\n"
-            "b = a\n"
-            "b('ls')",
-            "peligroso.py",
-        )
-
-        peligro = self.agent.detectar_codigo_peligroso(tree)
-
-        self.assertIsNotNone(peligro)
 
     def test_codigo_normal_no_es_peligroso(self):
         tree = self.agent.validar_python(

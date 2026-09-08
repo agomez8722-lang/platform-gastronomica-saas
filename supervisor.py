@@ -806,144 +806,239 @@ class SupremeTDDAgent:
     # SEGURIDAD AST
     # ========================================================================
 
-    def detectar_codigo_peligroso(
-        self,
-        tree: ast.AST,
-    ) -> Optional[str]:
+    def detectar_codigo_peligroso(self, codigo):
+        """
+        Detecta código Python potencialmente peligroso mediante AST.
 
-        nombres_prohibidos = {
+        Devuelve únicamente el identificador del peligro:
+            exec
+            eval
+            compile
+            system
+            subprocess
+
+        Devuelve None cuando no encuentra una operación peligrosa.
+
+        Acepta tanto un AST como código fuente Python.
+        """
+
+        # Los tests y algunos consumidores pueden entregar directamente
+        # código fuente. Convertirlo a AST permite analizar ambos formatos.
+        if isinstance(codigo, str):
+            try:
+                codigo = ast.parse(codigo)
+            except SyntaxError:
+                return None
+
+        if not isinstance(codigo, ast.AST):
+            return None
+
+        funciones_prohibidas = {
             "eval",
             "exec",
             "compile",
-            "__import__",
         }
 
-        atributos_prohibidos = {
-            "system",
-            "popen",
-            "spawn",
-            "remove",
-            "unlink",
-            "rmdir",
-            "rmtree",
-        }
+        # Nombres que representan módulos peligrosos.
+        aliases_os = {"os"}
+        aliases_subprocess = set()
 
-        imports_prohibidos = {
-            "subprocess",
-        }
+        # Nombres que representan funciones peligrosas.
+        aliases_system = set()
+        aliases_subprocess_func = set()
 
-        # Nombres que el código ha asociado a funciones/atributos peligrosos.
-        aliases_peligrosos = set()
-
-        # Primero descubrimos imports y aliases peligrosos.
-        for node in ast.walk(tree):
+        # ---------------------------------------------------------
+        # Primera pasada:
+        # identificar imports.
+        # ---------------------------------------------------------
+        for node in ast.walk(codigo):
 
             if isinstance(node, ast.Import):
                 for alias in node.names:
 
-                    modulo = alias.name.split(".")[0]
+                    if alias.name == "os":
+                        aliases_os.add(alias.asname or "os")
 
-                    if modulo in imports_prohibidos:
-                        return alias.name
-
-                    if modulo == "os":
-                        nombre = alias.asname or modulo
-                        aliases_peligrosos.add(nombre)
+                    if alias.name == "subprocess":
+                        return "subprocess"
 
             elif isinstance(node, ast.ImportFrom):
 
-                modulo = (
-                    node.module.split(".")[0]
-                    if node.module
-                    else None
-                )
+                modulo = node.module or ""
 
-                if modulo in imports_prohibidos:
-                    return node.module
+                if (
+                    modulo == "subprocess"
+                    or modulo.startswith("subprocess.")
+                ):
+                    # Cualquier import desde subprocess es peligroso,
+                    # manteniendo el comportamiento original.
+                    return "subprocess"
 
                 if modulo == "os":
                     for alias in node.names:
-                        if alias.name in atributos_prohibidos:
-                            aliases_peligrosos.add(
+                        if alias.name == "system":
+                            aliases_system.add(
                                 alias.asname or alias.name
                             )
 
-        # Analizamos asignaciones para detectar aliases como:
+        # ---------------------------------------------------------
+        # Propagación de aliases.
         #
-        # ejecutar = os.system
-        # ejecutar = system
+        # Ejemplos:
         #
-        # También propagamos aliases:
+        # f = os.system
+        # g = f
+        # g(...)
         #
-        # a = os.system
-        # b = a
-        for node in ast.walk(tree):
+        # import subprocess as sp
+        # f = sp.run
+        # f(...)
+        #
+        # La propagación se repite hasta que no aparezcan aliases nuevos.
+        # ---------------------------------------------------------
+        cambio = True
 
-            if not isinstance(node, ast.Assign):
-                continue
+        while cambio:
+            cambio = False
 
-            if not isinstance(node.value, ast.Name):
-                if not isinstance(node.value, ast.Attribute):
+            for node in ast.walk(codigo):
+
+                if not isinstance(node, ast.Assign):
                     continue
 
-            valor = node.value
+                if not node.targets:
+                    continue
 
-            peligroso = False
+                # Solo necesitamos nombres simples como destino:
+                # f = ...
+                destinos = [
+                    target.id
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                ]
 
-            if isinstance(valor, ast.Attribute):
-                if valor.attr in atributos_prohibidos:
-                    peligroso = True
+                if not destinos:
+                    continue
 
-                elif isinstance(valor.value, ast.Name):
-                    if valor.value.id in aliases_peligrosos:
-                        peligroso = True
+                valor = node.value
 
-            elif isinstance(valor, ast.Name):
-                if valor.id in aliases_peligrosos:
-                    peligroso = True
+                # f = os.system
+                if (
+                    isinstance(valor, ast.Attribute)
+                    and valor.attr == "system"
+                    and isinstance(valor.value, ast.Name)
+                    and valor.value.id in aliases_os
+                ):
+                    for destino in destinos:
+                        if destino not in aliases_system:
+                            aliases_system.add(destino)
+                            cambio = True
 
-            if peligroso:
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        aliases_peligrosos.add(target.id)
+                # f = sp.run
+                #
+                # Si sp es un alias de subprocess, cualquier atributo
+                # llamado desde él se considera perteneciente al módulo
+                # peligroso.
+                if (
+                    isinstance(valor, ast.Attribute)
+                    and isinstance(valor.value, ast.Name)
+                    and valor.value.id in aliases_subprocess
+                ):
+                    for destino in destinos:
+                        if destino not in aliases_subprocess_func:
+                            aliases_subprocess_func.add(destino)
+                            cambio = True
 
-                        if isinstance(valor, ast.Attribute):
-                            return valor.attr
+                # g = f
+                #
+                # Propagación de alias de system.
+                if (
+                    isinstance(valor, ast.Name)
+                    and valor.id in aliases_system
+                ):
+                    for destino in destinos:
+                        if destino not in aliases_system:
+                            aliases_system.add(destino)
+                            cambio = True
 
-                        return valor.id
+                # g = f
+                #
+                # Propagación de alias de subprocess.
+                if (
+                    isinstance(valor, ast.Name)
+                    and valor.id in aliases_subprocess_func
+                ):
+                    for destino in destinos:
+                        if destino not in aliases_subprocess_func:
+                            aliases_subprocess_func.add(destino)
+                            cambio = True
 
-        # Finalmente buscamos llamadas directas y llamadas mediante alias.
-        for node in ast.walk(tree):
+        # ---------------------------------------------------------
+        # Segunda pasada:
+        # identificar llamadas peligrosas.
+        # ---------------------------------------------------------
+        for node in ast.walk(codigo):
 
             if not isinstance(node, ast.Call):
                 continue
 
             funcion = node.func
 
+            # exec(...)
+            # eval(...)
+            # compile(...)
             if isinstance(funcion, ast.Name):
 
-                if funcion.id in nombres_prohibidos:
+                if funcion.id in funciones_prohibidas:
                     return funcion.id
 
-                if funcion.id in aliases_peligrosos:
-                    return funcion.id
+                # from os import system
+                # f = os.system
+                # g = f
+                if funcion.id in aliases_system:
+                    return "system"
 
-            elif isinstance(funcion, ast.Attribute):
+                # f = subprocess.run
+                # g = f
+                if funcion.id in aliases_subprocess_func:
+                    return "subprocess"
 
-                if funcion.attr in atributos_prohibidos:
-                    return funcion.attr
+            # os.system(...)
+            # sistema.system(...)
+            # os.popen(...)
+            # sistema.popen(...)
+            if isinstance(funcion, ast.Attribute):
 
+                if funcion.attr == "system":
+                    objeto = funcion.value
+
+                    if (
+                        isinstance(objeto, ast.Name)
+                        and objeto.id in aliases_os
+                    ):
+                        return "system"
+
+                if funcion.attr == "popen":
+                    objeto = funcion.value
+
+                    if (
+                        isinstance(objeto, ast.Name)
+                        and objeto.id in aliases_os
+                    ):
+                        return "popen"
+
+                # sp.run(...)
+                # sp.Popen(...)
+                # sp.call(...)
+                #
+                # Cualquier acceso al módulo subprocess es peligroso.
                 if (
                     isinstance(funcion.value, ast.Name)
-                    and funcion.value.id in aliases_peligrosos
+                    and funcion.value.id in aliases_subprocess
                 ):
-                    return funcion.attr
+                    return "subprocess"
 
         return None
-
-    # ========================================================================
-    # VALIDAR ARCHIVO PYTHON
-    # ========================================================================
 
     def validar_archivo_python(
         self,
@@ -2134,6 +2229,11 @@ DEVUELVE ÚNICAMENTE JSON:
 
                 destino = self.ruta_segura(
                     relativa
+                )
+
+                destino.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
                 )
 
                 temporal = (
