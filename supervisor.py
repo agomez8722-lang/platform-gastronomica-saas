@@ -2096,6 +2096,11 @@ DEVUELVE ÚNICAMENTE JSON:
                     )
                 )
 
+                temporal.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+
                 temporal.write_text(
                     contenido,
                     encoding="utf-8",

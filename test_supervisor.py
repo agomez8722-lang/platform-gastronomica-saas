@@ -89,6 +89,185 @@ class TestSupremeTDDAgent(unittest.TestCase):
             "VERSION = 1\n",
         )
 
+    def test_consolidar_varios_archivos(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 2\n",
+        )
+
+        self.assertEqual(
+            config.read_text(encoding="utf-8"),
+            "DEBUG = True\n",
+        )
+
+    def test_consolidar_error_restaurar_varios_archivos(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+            "archivo_invalido.txt": "contenido\n",
+        }
+
+        original = self.agent.ruta_segura
+
+        def ruta_segura_fallida(relativa):
+            if relativa == "archivo_invalido.txt":
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original(relativa)
+
+        self.agent.ruta_segura = ruta_segura_fallida
+
+        with self.assertRaises(
+            RuntimeError
+        ):
+            self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertEqual(
+            config.read_text(encoding="utf-8"),
+            "DEBUG = False\n",
+        )
+
+
+    def test_consolidar_crea_directorios_anidados(self):
+        propuesta = {
+            "src/modulos/feature.py": (
+                "def feature():\n"
+                "    return True\n"
+            ),
+        }
+
+        self.agent.consolidar(propuesta)
+
+        archivo = (
+            self.target
+            / "src"
+            / "modulos"
+            / "feature.py"
+        )
+
+        self.assertTrue(archivo.exists())
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "def feature():\n"
+            "    return True\n",
+        )
+
+    def test_consolidar_crea_archivo_nuevo(self):
+        archivo = self.target / "nuevo.py"
+
+        self.assertFalse(archivo.exists())
+
+        propuesta = {
+            "nuevo.py": "VALOR = 123\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertTrue(archivo.exists())
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "VALOR = 123\n",
+        )
+
+    def test_consolidar_no_elimina_archivos_no_propuestos(self):
+        existente = self.target / "existente.py"
+
+        existente.write_text(
+            "NO_CAMBIAR = True\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertTrue(existente.exists())
+
+        self.assertEqual(
+            existente.read_text(encoding="utf-8"),
+            "NO_CAMBIAR = True\n",
+        )
+
+    def test_consolidar_reemplaza_archivo_existente(self):
+        archivo = self.target / "main.py"
+
+        archivo.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "VERSION = 2\n",
+        )
+
+    def test_consolidar_no_deja_archivos_temporales(self):
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        temporales = list(
+            self.target.rglob("*.supreme.tmp")
+        )
+
+        self.assertEqual(
+            temporales,
+            [],
+        )
+
 
     def tearDown(self):
         self.tmp.cleanup()
