@@ -294,6 +294,45 @@ def sumar(a, b):
             "system",
         )
 
+    def test_from_os_system_alias_es_peligroso(self):
+        tree = self.agent.validar_python(
+            "from os import system\n"
+            "ejecutar = system\n"
+            "ejecutar('ls')",
+            "peligroso.py",
+        )
+
+        peligro = self.agent.detectar_codigo_peligroso(tree)
+
+        self.assertIsNotNone(peligro)
+
+    def test_import_os_alias_es_peligroso(self):
+        tree = self.agent.validar_python(
+            "import os as sistema\n"
+            "sistema.system('ls')",
+            "peligroso.py",
+        )
+
+        peligro = self.agent.detectar_codigo_peligroso(tree)
+
+        self.assertEqual(
+            peligro,
+            "system",
+        )
+
+    def test_alias_de_alias_es_peligroso(self):
+        tree = self.agent.validar_python(
+            "import os\n"
+            "a = os.system\n"
+            "b = a\n"
+            "b('ls')",
+            "peligroso.py",
+        )
+
+        peligro = self.agent.detectar_codigo_peligroso(tree)
+
+        self.assertIsNotNone(peligro)
+
     def test_codigo_normal_no_es_peligroso(self):
         tree = self.agent.validar_python(
             """

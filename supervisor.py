@@ -832,80 +832,112 @@ class SupremeTDDAgent:
             "subprocess",
         }
 
+        # Nombres que el código ha asociado a funciones/atributos peligrosos.
+        aliases_peligrosos = set()
+
+        # Primero descubrimos imports y aliases peligrosos.
         for node in ast.walk(tree):
 
-            if isinstance(
-                node,
-                ast.Call,
-            ):
-
-                if isinstance(
-                    node.func,
-                    ast.Name,
-                ):
-
-                    if (
-                        node.func.id
-                        in nombres_prohibidos
-                    ):
-
-                        return node.func.id
-
-                elif isinstance(
-                    node.func,
-                    ast.Attribute,
-                ):
-
-                    if (
-                        node.func.attr
-                        in atributos_prohibidos
-                    ):
-
-                        return node.func.attr
-
-            if isinstance(
-                node,
-                ast.Import,
-            ):
-
+            if isinstance(node, ast.Import):
                 for alias in node.names:
 
-                    if (
-                        alias.name.split(".")[0]
-                        in imports_prohibidos
-                    ):
+                    modulo = alias.name.split(".")[0]
 
+                    if modulo in imports_prohibidos:
                         return alias.name
 
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            ):
+                    if modulo == "os":
+                        nombre = alias.asname or modulo
+                        aliases_peligrosos.add(nombre)
 
-                if (
-                    node.module
-                    and node.module.split(".")[0]
-                    in imports_prohibidos
-                ):
+            elif isinstance(node, ast.ImportFrom):
 
+                modulo = (
+                    node.module.split(".")[0]
+                    if node.module
+                    else None
+                )
+
+                if modulo in imports_prohibidos:
                     return node.module
 
-            if isinstance(
-                node,
-                ast.Assign,
-            ):
+                if modulo == "os":
+                    for alias in node.names:
+                        if alias.name in atributos_prohibidos:
+                            aliases_peligrosos.add(
+                                alias.asname or alias.name
+                            )
 
-                if isinstance(
-                    node.value,
-                    ast.Attribute,
+        # Analizamos asignaciones para detectar aliases como:
+        #
+        # ejecutar = os.system
+        # ejecutar = system
+        #
+        # También propagamos aliases:
+        #
+        # a = os.system
+        # b = a
+        for node in ast.walk(tree):
+
+            if not isinstance(node, ast.Assign):
+                continue
+
+            if not isinstance(node.value, ast.Name):
+                if not isinstance(node.value, ast.Attribute):
+                    continue
+
+            valor = node.value
+
+            peligroso = False
+
+            if isinstance(valor, ast.Attribute):
+                if valor.attr in atributos_prohibidos:
+                    peligroso = True
+
+                elif isinstance(valor.value, ast.Name):
+                    if valor.value.id in aliases_peligrosos:
+                        peligroso = True
+
+            elif isinstance(valor, ast.Name):
+                if valor.id in aliases_peligrosos:
+                    peligroso = True
+
+            if peligroso:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        aliases_peligrosos.add(target.id)
+
+                        if isinstance(valor, ast.Attribute):
+                            return valor.attr
+
+                        return valor.id
+
+        # Finalmente buscamos llamadas directas y llamadas mediante alias.
+        for node in ast.walk(tree):
+
+            if not isinstance(node, ast.Call):
+                continue
+
+            funcion = node.func
+
+            if isinstance(funcion, ast.Name):
+
+                if funcion.id in nombres_prohibidos:
+                    return funcion.id
+
+                if funcion.id in aliases_peligrosos:
+                    return funcion.id
+
+            elif isinstance(funcion, ast.Attribute):
+
+                if funcion.attr in atributos_prohibidos:
+                    return funcion.attr
+
+                if (
+                    isinstance(funcion.value, ast.Name)
+                    and funcion.value.id in aliases_peligrosos
                 ):
-
-                    if (
-                        node.value.attr
-                        in atributos_prohibidos
-                    ):
-
-                        return node.value.attr
+                    return funcion.attr
 
         return None
 
