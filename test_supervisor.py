@@ -54,6 +54,42 @@ class TestSupremeTDDAgent(unittest.TestCase):
 
         self.agent = SupremeTDDAgent(config)
 
+    def test_consolidar_error_restaurar_backup(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "archivo_invalido.txt": "contenido\n",
+        }
+
+        original = self.agent.ruta_segura
+
+        def ruta_segura_fallida(relativa):
+            if relativa == "archivo_invalido.txt":
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original(relativa)
+
+        self.agent.ruta_segura = ruta_segura_fallida
+
+        with self.assertRaises(
+            RuntimeError
+        ):
+            self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+
     def tearDown(self):
         self.tmp.cleanup()
 
@@ -111,6 +147,52 @@ class TestSupremeTDDAgent(unittest.TestCase):
             "tiempo máximo",
             detalle,
         )
+
+
+        main = self.target / "main.py"
+    def test_consolidar_crea_backup_y_actualiza_archivo(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 2\n",
+        )
+
+        backups = list(
+            self.agent.backup_dir.iterdir()
+        )
+
+        self.assertEqual(
+            len(backups),
+            1,
+        )
+
+        backup_main = (
+            backups[0] / "main.py"
+        )
+
+        self.assertTrue(
+            backup_main.exists()
+        )
+
+        self.assertEqual(
+            backup_main.read_text(
+                encoding="utf-8"
+            ),
+            "VERSION = 1\n",
+        )
+
 
     # ================================================================
     # CONFIGURACIÓN / ENTORNO
