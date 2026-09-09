@@ -2276,12 +2276,14 @@ DEVUELVE ÚNICAMENTE JSON:
                 },
             )
 
-        except Exception:
+        except Exception as error_original:
 
             LOGGER.exception(
                 "Error durante consolidación. "
                 "Intentando restaurar backup."
             )
+
+            error_rollback = None
 
             for relativa in rutas:
 
@@ -2293,21 +2295,36 @@ DEVUELVE ÚNICAMENTE JSON:
                     relativa
                 )
 
-                if origen_backup.exists():
+                try:
 
-                    destino.parent.mkdir(
-                        parents=True,
-                        exist_ok=True,
+                    if origen_backup.exists():
+
+                        destino.parent.mkdir(
+                            parents=True,
+                            exist_ok=True,
+                        )
+
+                        shutil.copy2(
+                            origen_backup,
+                            destino,
+                        )
+
+                    elif destino.exists():
+
+                        destino.unlink()
+
+                except Exception as error:
+
+                    if error_rollback is None:
+                        error_rollback = error
+
+                    LOGGER.exception(
+                        "Error durante rollback de %s",
+                        relativa,
                     )
 
-                    shutil.copy2(
-                        origen_backup,
-                        destino,
-                    )
-
-                elif destino.exists():
-
-                    destino.unlink()
+            if error_rollback is not None:
+                raise error_rollback from error_original
 
             raise
 

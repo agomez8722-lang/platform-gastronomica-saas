@@ -133,8 +133,16 @@ class TestSupremeTDDAgent(unittest.TestCase):
             encoding="utf-8",
         )
 
+        config = self.target / "config.py"
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
         propuesta = {
             "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
             "nuevo.py": "NUEVO = True\n",
         }
 
@@ -1771,5 +1779,207 @@ def main():
             contenido,
         )
 
-if __name__ == "__main__":
-    unittest.main()
+
+    def test_consolidar_rollback_falla_al_eliminar_archivo_nuevo(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+        nuevo = self.target / "nuevo.py"
+
+        main.write_text(
+            "VERSION = 1\\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\\n",
+            "config.py": "DEBUG = True\\n",
+            "nuevo.py": "NUEVO = True\\n",
+            "fallo.py": "FALLO = True\\n",
+        }
+
+        import os
+        from pathlib import Path
+        from unittest.mock import patch
+
+        original_replace = os.replace
+
+        llamadas_replace = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas_replace["count"] += 1
+
+            # 1 -> main.py
+            # 2 -> config.py
+            # 3 -> nuevo.py
+            # 4 -> fallo.py: provoca el fallo después
+            #      de que nuevo.py ya existe.
+            if llamadas_replace["count"] == 4:
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        def unlink_fallido(self_path, *args, **kwargs):
+            if Path(self_path).resolve() == nuevo.resolve():
+                raise OSError(
+                    "Error simulado eliminando archivo nuevo"
+                )
+
+            return original_unlink(
+                self_path,
+                *args,
+                **kwargs,
+            )
+
+        original_unlink = Path.unlink
+
+        os.replace = replace_fallido
+
+        try:
+            with patch.object(
+                Path,
+                "unlink",
+                new=unlink_fallido,
+            ):
+                with self.assertRaises(OSError):
+                    self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+    def test_consolidar_rollback_falla_despues_de_modificar_varios_archivos(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+        nuevo = self.target / "nuevo.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        import os
+        import shutil
+
+        original_replace = os.replace
+        original_copy2 = shutil.copy2
+
+        llamadas_replace = {"count": 0}
+        llamadas_copy2 = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas_replace["count"] += 1
+
+            if llamadas_replace["count"] == 3:
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        def copy2_fallido(origen, destino):
+            llamadas_copy2["count"] += 1
+
+            if llamadas_copy2["count"] == 1:
+                raise OSError(
+                    "Error simulado en primera restauración"
+                )
+
+            return original_copy2(
+                origen,
+                destino,
+            )
+
+        os.replace = replace_fallido
+        shutil.copy2 = copy2_fallido
+
+        try:
+            with self.assertRaises(OSError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+            shutil.copy2 = original_copy2
+
+    def test_consolidar_rollback_falla_si_no_puede_eliminar_nuevo_anidado(self):
+        main = self.target / "main.py"
+        nuevo = self.target / "subdir" / "nuevo.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "subdir/nuevo.py": "NUEVO = True\n",
+            "fallo.py": "FALLO = True\n",
+        }
+
+        import os
+        from pathlib import Path
+        from unittest.mock import patch
+
+        original_replace = os.replace
+        original_unlink = Path.unlink
+        llamadas_replace = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas_replace["count"] += 1
+
+            # El primer replace modifica main.py.
+            # El segundo replace crea subdir/nuevo.py.
+            # El tercero falla y fuerza el rollback.
+            if llamadas_replace["count"] == 3:
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        def unlink_fallido(self_path, *args, **kwargs):
+            if Path(self_path).resolve() == nuevo.resolve():
+                raise OSError(
+                    "Error simulado eliminando nuevo anidado"
+                )
+
+            return original_unlink(
+                self_path,
+                *args,
+                **kwargs,
+            )
+
+        os.replace = replace_fallido
+
+        try:
+            with patch.object(
+                Path,
+                "unlink",
+                new=unlink_fallido,
+            ):
+                with self.assertRaises(OSError):
+                    self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
