@@ -2216,6 +2216,74 @@ def main():
         )
 
 
+    def test_consolidar_rollback_continua_si_limpieza_temporal_falla(self):
+        archivo = self.target / "main.py"
+
+        archivo.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        import os
+
+        original_replace = os.replace
+        original_unlink = Path.unlink
+
+        llamadas_replace = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas_replace["count"] += 1
+
+            if llamadas_replace["count"] == 2:
+                raise OSError(
+                    "Error simulado durante replace"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        def unlink_fallido(self_path, *args, **kwargs):
+            if self_path.name == ".nuevo.py.supreme.tmp":
+                raise OSError(
+                    "Error simulado limpiando temporal durante rollback"
+                )
+
+            return original_unlink(
+                self_path,
+                *args,
+                **kwargs
+            )
+
+        os.replace = replace_fallido
+        Path.unlink = unlink_fallido
+
+        try:
+            with self.assertRaises(OSError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+            Path.unlink = original_unlink
+
+        self.assertEqual(
+            archivo.read_text(
+                encoding="utf-8"
+            ),
+            "VERSION = 1\n",
+        )
+
+        nuevo = self.target / "nuevo.py"
+
+        self.assertFalse(
+            nuevo.exists()
+        )
+
     def test_consolidar_rollback_falla_al_eliminar_archivo_nuevo(self):
         main = self.target / "main.py"
         config = self.target / "config.py"
