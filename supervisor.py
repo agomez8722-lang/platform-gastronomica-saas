@@ -2213,6 +2213,12 @@ DEVUELVE ÚNICAMENTE JSON:
             archivos.keys()
         )
 
+        if not rutas:
+            LOGGER.info(
+                "Consolidación completada."
+            )
+            return
+
         backup = self.crear_backup(
             rutas
         )

@@ -901,6 +901,23 @@ class TestSupremeTDDAgent(unittest.TestCase):
             "    return True\n",
         )
 
+    def test_consolidar_propuesta_vacia_no_crea_backup(self):
+        backups_antes = list(
+            self.agent.backup_dir.iterdir()
+        )
+
+        self.agent.consolidar({})
+
+        backups_despues = list(
+            self.agent.backup_dir.iterdir()
+        )
+
+        self.assertEqual(
+            backups_despues,
+            backups_antes,
+        )
+
+
     def test_consolidar_propuesta_vacia_no_modifica_proyecto(self):
         self.agent.consolidar({})
 
