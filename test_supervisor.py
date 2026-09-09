@@ -2068,6 +2068,67 @@ def main():
             [],
         )
 
+    def test_consolidar_registra_memoria_con_datos_correctos(self):
+        archivo = self.target / "main.py"
+
+        archivo.write_text(
+            "VERSION = 1\\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\\n",
+        }
+
+        registros = []
+
+        memoria_original = self.agent.guardar_memoria
+
+        def guardar_memoria_registro(tipo, datos):
+            registros.append(
+                (
+                    tipo,
+                    datos,
+                )
+            )
+
+        self.agent.guardar_memoria = guardar_memoria_registro
+
+        try:
+            self.agent.consolidar(propuesta)
+        finally:
+            self.agent.guardar_memoria = memoria_original
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "VERSION = 2\\n",
+        )
+
+        self.assertEqual(
+            len(registros),
+            1,
+        )
+
+        tipo, datos = registros[0]
+
+        self.assertEqual(
+            tipo,
+            "consolidation",
+        )
+
+        self.assertEqual(
+            datos["files"],
+            ["main.py"],
+        )
+
+        self.assertTrue(
+            datos["backup"],
+        )
+
+        self.assertTrue(
+            Path(datos["backup"]).exists()
+        )
+
     def test_guardar_memoria(self):
         self.agent.guardar_memoria(
             "test",
