@@ -2313,10 +2313,16 @@ DEVUELVE ÚNICAMENTE JSON:
 
                         destino.unlink()
 
-                        try:
-                            destino.parent.rmdir()
-                        except OSError:
-                            pass
+                        directorio = destino.parent
+
+                        while directorio != self.target_path:
+
+                            try:
+                                directorio.rmdir()
+                            except OSError:
+                                break
+
+                            directorio = directorio.parent
 
                 except Exception as error:
 

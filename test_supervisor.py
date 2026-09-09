@@ -1898,6 +1898,95 @@ def main():
             archivos,
         )
 
+    def test_consolidar_rollback_elimina_todos_los_directorios_anidados_vacios(self):
+        main = self.target / "main.py"
+        nuevo = (
+            self.target
+            / "nivel1"
+            / "nivel2"
+            / "nivel3"
+            / "nuevo.py"
+        )
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nivel1/nivel2/nivel3/nuevo.py": "NUEVO = True\n",
+            "fallo.py": "FALLO = True\n",
+        }
+
+        import os
+
+        original_replace = os.replace
+        llamadas = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas["count"] += 1
+
+            # 1 -> main.py
+            # 2 -> nuevo.py anidado
+            # 3 -> fallo.py: provoca rollback
+            if llamadas["count"] == 3:
+                raise RuntimeError(
+                    "Error simulado después de crear archivo profundamente anidado"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        os.replace = replace_fallido
+
+        try:
+            with self.assertRaises(RuntimeError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            nuevo.exists()
+        )
+
+        self.assertFalse(
+            (
+                self.target
+                / "nivel1"
+                / "nivel2"
+                / "nivel3"
+            ).exists()
+        )
+
+        self.assertFalse(
+            (
+                self.target
+                / "nivel1"
+                / "nivel2"
+            ).exists()
+        )
+
+        self.assertFalse(
+            (
+                self.target
+                / "nivel1"
+            ).exists()
+        )
+
+        self.assertTrue(
+            self.target.exists()
+        )
+
+
+
     # ================================================================
     # MEMORIA
     # ================================================================
