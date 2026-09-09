@@ -1014,6 +1014,45 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_consolidar_continua_si_limpieza_temporal_falla(self):
+        propuesta = {
+            "main.py": "VERSION = 2\\n",
+        }
+
+        original_unlink = Path.unlink
+
+        def unlink_fallido(self_path, *args, **kwargs):
+            if self_path.name == ".main.py.supreme.tmp":
+                raise OSError(
+                    "Error simulado limpiando temporal"
+                )
+
+            return original_unlink(
+                self_path,
+                *args,
+                **kwargs,
+            )
+
+        Path.unlink = unlink_fallido
+
+        try:
+            self.agent.consolidar(propuesta)
+        finally:
+            Path.unlink = original_unlink
+
+        archivo = self.target / "main.py"
+
+        self.assertTrue(
+            archivo.exists()
+        )
+
+        self.assertEqual(
+            archivo.read_text(
+                encoding="utf-8"
+            ),
+            "VERSION = 2\\n",
+        )
+
     def tearDown(self):
         self.tmp.cleanup()
 
