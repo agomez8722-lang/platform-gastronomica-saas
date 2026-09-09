@@ -2305,6 +2305,10 @@ DEVUELVE ÚNICAMENTE JSON:
                         destino,
                     )
 
+                elif destino.exists():
+
+                    destino.unlink()
+
             raise
 
         finally:

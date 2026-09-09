@@ -228,6 +228,61 @@ class TestSupremeTDDAgent(unittest.TestCase):
             (self.target / "nuevo.py").exists()
         )
 
+    def test_consolidar_rollback_elimina_archivos_nuevos_despues_de_replace(self):
+        main = self.target / "main.py"
+        nuevo = self.target / "nuevo.py"
+        tercero = self.target / "tercero.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nuevo.py": "NUEVO = True\n",
+            "tercero.py": "TERCERO = True\n",
+        }
+
+        import os
+
+        original_replace = os.replace
+        llamadas = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas["count"] += 1
+
+            if llamadas["count"] == 3:
+                raise RuntimeError(
+                    "Error simulado después de crear archivo nuevo"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        os.replace = replace_fallido
+
+        try:
+            with self.assertRaises(RuntimeError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            nuevo.exists()
+        )
+
+        self.assertFalse(
+            tercero.exists()
+        )
+
     def test_consolidar_varios_archivos(self):
         main = self.target / "main.py"
         config = self.target / "config.py"
