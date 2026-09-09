@@ -335,6 +335,311 @@ class TestSupremeTDDAgent(unittest.TestCase):
             os.replace = original_replace
             shutil.copy2 = original_copy2
 
+    def test_consolidar_rollback_limpia_temporales_si_falla_primer_replace(self):
+        main = self.target / "main.py"
+        nuevo = self.target / "nuevo.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        import os
+
+        original_replace = os.replace
+
+        def replace_fallido(origen, destino):
+            raise RuntimeError(
+                "Error simulado en primer replace"
+            )
+
+        os.replace = replace_fallido
+
+        try:
+            with self.assertRaises(RuntimeError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            nuevo.exists()
+        )
+
+        self.assertFalse(
+            (
+                self.target / ".main.py.supreme.tmp"
+            ).exists()
+        )
+
+        self.assertFalse(
+            (
+                self.target / ".nuevo.py.supreme.tmp"
+            ).exists()
+        )
+
+
+    def test_consolidar_rollback_elimina_archivo_nuevo_anidado(self):
+        main = self.target / "main.py"
+        nuevo = self.target / "subdir" / "nuevo.py"
+        tercero = self.target / "subdir" / "tercero.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "subdir/nuevo.py": "NUEVO = True\n",
+            "subdir/tercero.py": "TERCERO = True\n",
+        }
+
+        import os
+
+        original_replace = os.replace
+        llamadas = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas["count"] += 1
+
+            if llamadas["count"] == 3:
+                raise RuntimeError(
+                    "Error simulado con archivo anidado"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        os.replace = replace_fallido
+
+        try:
+            with self.assertRaises(RuntimeError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            nuevo.exists()
+        )
+
+        self.assertFalse(
+            tercero.exists()
+        )
+
+
+    def test_consolidar_rollback_restaurar_archivo_anidado_existente(self):
+        main = self.target / "main.py"
+        config = self.target / "config" / "settings.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config/settings.py": "DEBUG = True\n",
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        import os
+
+        original_replace = os.replace
+        llamadas = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas["count"] += 1
+
+            if llamadas["count"] == 3:
+                raise RuntimeError(
+                    "Error simulado restaurando archivo anidado"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        os.replace = replace_fallido
+
+        try:
+            with self.assertRaises(RuntimeError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertEqual(
+            config.read_text(encoding="utf-8"),
+            "DEBUG = False\n",
+        )
+
+        self.assertFalse(
+            (self.target / "nuevo.py").exists()
+        )
+
+
+    def test_consolidar_falla_antes_de_modificar_si_backup_falla(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+        }
+
+        import shutil
+
+        original_copy2 = shutil.copy2
+
+        def copy2_fallido(origen, destino):
+            raise OSError(
+                "Error simulado creando backup"
+            )
+
+        shutil.copy2 = copy2_fallido
+
+        try:
+            with self.assertRaises(OSError):
+                self.agent.consolidar(propuesta)
+        finally:
+            shutil.copy2 = original_copy2
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+
+    def test_consolidar_falla_si_no_puede_crear_temporal(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+        }
+
+        from unittest.mock import patch
+
+        path_type = type(self.target / "dummy")
+        original_write_text = path_type.write_text
+
+        def write_text_fallido(self_path, contenido, *args, **kwargs):
+            if self_path.name == ".main.py.supreme.tmp":
+                raise OSError(
+                    "Error simulado creando temporal"
+                )
+
+            return original_write_text(
+                self_path,
+                contenido,
+                *args,
+                **kwargs,
+            )
+
+        with patch.object(
+            path_type,
+            "write_text",
+            new=write_text_fallido,
+        ):
+            with self.assertRaises(OSError):
+                self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+
+    def test_consolidar_exito_elimina_todos_los_temporales(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+        nuevo = self.target / "nuevo.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        self.agent.consolidar(propuesta)
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 2\n",
+        )
+
+        self.assertEqual(
+            config.read_text(encoding="utf-8"),
+            "DEBUG = True\n",
+        )
+
+        self.assertEqual(
+            nuevo.read_text(encoding="utf-8"),
+            "NUEVO = True\n",
+        )
+
+        self.assertFalse(
+            (self.target / ".main.py.supreme.tmp").exists()
+        )
+
+        self.assertFalse(
+            (self.target / ".config.py.supreme.tmp").exists()
+        )
+
+        self.assertFalse(
+            (self.target / ".nuevo.py.supreme.tmp").exists()
+        )
+
+
     def test_consolidar_varios_archivos(self):
         main = self.target / "main.py"
         config = self.target / "config.py"
