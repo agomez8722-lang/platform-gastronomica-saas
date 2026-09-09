@@ -901,6 +901,26 @@ class TestSupremeTDDAgent(unittest.TestCase):
             "    return True\n",
         )
 
+    def test_consolidar_propuesta_vacia_no_modifica_proyecto(self):
+        self.agent.consolidar({})
+
+        archivos = list(
+            self.target.rglob("*")
+        )
+
+        archivos = [
+            path
+            for path in archivos
+            if path.is_file()
+            and ".supreme_agent" not in path.parts
+        ]
+
+        self.assertEqual(
+            archivos,
+            [],
+        )
+
+
     def test_consolidar_crea_archivo_nuevo(self):
         archivo = self.target / "nuevo.py"
 
