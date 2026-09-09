@@ -54,6 +54,41 @@ class TestSupremeTDDAgent(unittest.TestCase):
 
         self.agent = SupremeTDDAgent(config)
 
+    def test_ruta_segura_rechaza_traversal_fuera_del_proyecto(self):
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.ruta_segura("../fuera.py")
+
+        self.assertIn(
+            "Ruta fuera del proyecto",
+            str(contexto.exception),
+        )
+
+
+    def test_ruta_segura_rechaza_ruta_absoluta_fuera_del_proyecto(self):
+        fuera = (
+            Path(self.tmp.name)
+            / "fuera.py"
+        )
+
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.ruta_segura(str(fuera))
+
+        self.assertIn(
+            "Ruta fuera del proyecto",
+            str(contexto.exception),
+        )
+
+
+    def test_ruta_segura_rechaza_archivo_oculto(self):
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.ruta_segura(".secreto.py")
+
+        self.assertIn(
+            "No se permite modificar archivos ocultos",
+            str(contexto.exception),
+        )
+
+
     def test_consolidar_error_restaurar_backup(self):
         main = self.target / "main.py"
 
