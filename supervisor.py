@@ -2175,30 +2175,46 @@ DEVUELVE ÚNICAMENTE JSON:
             exist_ok=True,
         )
 
-        for relativa in archivos:
+        try:
 
-            path = self.ruta_segura(
-                relativa
-            )
+            for relativa in archivos:
 
-            if not path.exists():
-                continue
+                path = self.ruta_segura(
+                    relativa
+                )
 
-            copia = (
-                destino / relativa
-            )
+                if not path.exists():
+                    continue
 
-            copia.parent.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
+                copia = (
+                    destino / relativa
+                )
 
-            shutil.copy2(
-                path,
-                copia,
-            )
+                copia.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
 
-        return destino
+                shutil.copy2(
+                    path,
+                    copia,
+                )
+
+            return destino
+
+        except Exception:
+
+            try:
+                shutil.rmtree(
+                    destino
+                )
+            except OSError:
+                LOGGER.exception(
+                    "No se pudo limpiar backup parcial: %s",
+                    destino,
+                )
+
+            raise
 
     # ========================================================================
     # CONSOLIDACIÓN TRANSACCIONAL

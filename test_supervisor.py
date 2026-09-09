@@ -667,6 +667,62 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_crear_backup_falla_sin_dejar_backup_parcial(self):
+        import shutil
+
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = True\n",
+            encoding="utf-8",
+        )
+
+        original_copy2 = shutil.copy2
+        llamadas = {"count": 0}
+
+        def copy2_fallido(origen, destino):
+            llamadas["count"] += 1
+
+            if llamadas["count"] == 2:
+                raise OSError(
+                    "Error simulado durante segundo backup"
+                )
+
+            return original_copy2(
+                origen,
+                destino,
+            )
+
+        shutil.copy2 = copy2_fallido
+
+        try:
+            with self.assertRaises(OSError):
+                self.agent.crear_backup(
+                    [
+                        "main.py",
+                        "config.py",
+                    ]
+                )
+        finally:
+            shutil.copy2 = original_copy2
+
+        backups = list(
+            self.agent.backup_dir.iterdir()
+        )
+
+        self.assertEqual(
+            backups,
+            [],
+        )
+
+
+
     def test_consolidar_falla_antes_de_modificar_si_backup_falla(self):
         main = self.target / "main.py"
 
