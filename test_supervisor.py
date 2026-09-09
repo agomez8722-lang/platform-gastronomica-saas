@@ -2028,6 +2028,46 @@ def main():
     # MEMORIA
     # ================================================================
 
+    def test_consolidar_continua_si_guardar_memoria_falla(self):
+        archivo = self.target / "main.py"
+
+        archivo.write_text(
+            "VERSION = 1\\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\\n",
+        }
+
+        memoria_original = self.agent.guardar_memoria
+
+        def guardar_memoria_fallida(tipo, datos):
+            raise OSError(
+                "Error simulado guardando memoria"
+            )
+
+        self.agent.guardar_memoria = guardar_memoria_fallida
+
+        try:
+            self.agent.consolidar(propuesta)
+        finally:
+            self.agent.guardar_memoria = memoria_original
+
+        self.assertEqual(
+            archivo.read_text(encoding="utf-8"),
+            "VERSION = 2\\n",
+        )
+
+        temporales = list(
+            self.target.rglob("*.supreme.tmp")
+        )
+
+        self.assertEqual(
+            temporales,
+            [],
+        )
+
     def test_guardar_memoria(self):
         self.agent.guardar_memoria(
             "test",

@@ -2274,13 +2274,19 @@ DEVUELVE ÚNICAMENTE JSON:
                 "Consolidación completada."
             )
 
-            self.guardar_memoria(
-                "consolidation",
-                {
-                    "files": rutas,
-                    "backup": str(backup),
-                },
-            )
+            try:
+                self.guardar_memoria(
+                    "consolidation",
+                    {
+                        "files": rutas,
+                        "backup": str(backup),
+                    },
+                )
+            except Exception as error_memoria:
+                LOGGER.warning(
+                    "No se pudo registrar memoria de consolidación: %s",
+                    error_memoria,
+                )
 
         except Exception as error_original:
 
