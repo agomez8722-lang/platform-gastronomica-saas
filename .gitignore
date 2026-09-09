@@ -7,3 +7,7 @@ backups/
 *.backup*
 historico.json
 tu_archivo
+
+# Archivos generados/locales
+repomix-output.xml
+fix_detectar.py
