@@ -283,6 +283,58 @@ class TestSupremeTDDAgent(unittest.TestCase):
             tercero.exists()
         )
 
+    def test_consolidar_falla_si_rollback_no_puede_restaurar(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "nuevo.py": "NUEVO = True\n",
+        }
+
+        import os
+        import shutil
+
+        original_replace = os.replace
+        original_copy2 = shutil.copy2
+
+        llamadas_replace = {"count": 0}
+        llamadas_copy2 = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas_replace["count"] += 1
+
+            if llamadas_replace["count"] == 2:
+                raise RuntimeError(
+                    "Error simulado durante consolidación"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        def copy2_fallido(origen, destino):
+            llamadas_copy2["count"] += 1
+
+            raise OSError(
+                "Error simulado durante rollback"
+            )
+
+        os.replace = replace_fallido
+        shutil.copy2 = copy2_fallido
+
+        try:
+            with self.assertRaises(OSError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+            shutil.copy2 = original_copy2
+
     def test_consolidar_varios_archivos(self):
         main = self.target / "main.py"
         config = self.target / "config.py"
