@@ -2313,6 +2313,11 @@ DEVUELVE ÚNICAMENTE JSON:
 
                         destino.unlink()
 
+                        try:
+                            destino.parent.rmdir()
+                        except OSError:
+                            pass
+
                 except Exception as error:
 
                     if error_rollback is None:

@@ -452,6 +452,62 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_consolidar_rollback_elimina_directorio_vacio_creado(self):
+        main = self.target / "main.py"
+        subdir = self.target / "subdir"
+        nuevo = subdir / "nuevo.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "subdir/nuevo.py": "NUEVO = True\n",
+            "fallo.py": "FALLO = True\n",
+        }
+
+        import os
+
+        original_replace = os.replace
+        llamadas = {"count": 0}
+
+        def replace_fallido(origen, destino):
+            llamadas["count"] += 1
+
+            if llamadas["count"] == 3:
+                raise RuntimeError(
+                    "Error simulado después de crear directorio"
+                )
+
+            return original_replace(
+                origen,
+                destino,
+            )
+
+        os.replace = replace_fallido
+
+        try:
+            with self.assertRaises(RuntimeError):
+                self.agent.consolidar(propuesta)
+        finally:
+            os.replace = original_replace
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertFalse(
+            nuevo.exists()
+        )
+
+        self.assertFalse(
+            subdir.exists()
+        )
+
+
     def test_consolidar_rollback_restaurar_archivo_anidado_existente(self):
         main = self.target / "main.py"
         config = self.target / "config" / "settings.py"
