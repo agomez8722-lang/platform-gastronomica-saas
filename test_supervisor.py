@@ -2129,6 +2129,27 @@ def main():
             Path(datos["backup"]).exists()
         )
 
+    def test_guardar_memoria_ignora_fallo_de_escritura(self):
+        historia_original = self.agent.history_file
+
+        class ArchivoHistoriaFallido:
+            def open(self, *args, **kwargs):
+                raise OSError(
+                    "Error simulado escribiendo historial"
+                )
+
+        self.agent.history_file = ArchivoHistoriaFallido()
+
+        try:
+            self.agent.guardar_memoria(
+                "test",
+                {
+                    "valor": 1,
+                },
+            )
+        finally:
+            self.agent.history_file = historia_original
+
     def test_guardar_memoria(self):
         self.agent.guardar_memoria(
             "test",
