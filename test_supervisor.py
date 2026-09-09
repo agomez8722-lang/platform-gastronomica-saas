@@ -89,6 +89,27 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_ruta_segura_rechaza_ruta_vacia(self):
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.ruta_segura("   ")
+
+        self.assertIn(
+            "Ruta vacía",
+            str(contexto.exception),
+        )
+
+
+    def test_ruta_segura_rechaza_tipo_invalido(self):
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.ruta_segura(None)
+
+        self.assertIn(
+            "La ruta debe ser texto",
+            str(contexto.exception),
+        )
+
+
+
     def test_consolidar_error_restaurar_backup(self):
         main = self.target / "main.py"
 
