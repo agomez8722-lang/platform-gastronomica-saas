@@ -89,6 +89,43 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_ruta_segura_acepta_ruta_normal(self):
+        resultado = self.agent.ruta_segura("src/main.py")
+
+        self.assertEqual(
+            resultado,
+            (self.target / "src" / "main.py").resolve(),
+        )
+
+
+    def test_ruta_segura_acepta_ruta_normalizada_interna(self):
+        resultado = self.agent.ruta_segura(
+            "src/../main.py"
+        )
+
+        self.assertEqual(
+            resultado,
+            (self.target / "main.py").resolve(),
+        )
+
+
+    def test_ruta_segura_rechaza_prefijo_parecido_al_proyecto(self):
+        fuera = (
+            self.target.parent
+            / (self.target.name + "_otro")
+            / "archivo.py"
+        )
+
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.ruta_segura(str(fuera))
+
+        self.assertIn(
+            "Ruta fuera del proyecto",
+            str(contexto.exception),
+        )
+
+
+
     def test_ruta_segura_rechaza_ruta_vacia(self):
         with self.assertRaises(ValueError) as contexto:
             self.agent.ruta_segura("   ")
