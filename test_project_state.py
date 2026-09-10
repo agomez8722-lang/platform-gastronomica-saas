@@ -69,7 +69,7 @@ class TestGitState(unittest.TestCase):
         )
 
         self.assertTrue(
-            state.recent_commits[0].startswith("6a93071"),
+            state.recent_commits[0].startswith("3c5482f"),
         )
 
     def test_obtiene_tags(self):
