@@ -1913,6 +1913,25 @@ def main():
         )
 
 
+    def test_validar_propuesta_rechaza_archivo_demasiado_grande(self):
+        self.agent.config.max_file_size = 10
+
+        archivos = {
+            "main.py": "def main():\n    pass\n",
+            "test_proyecto.py": "def test_ok():\n    assert True\n",
+        }
+
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.validar_propuesta(
+                archivos
+            )
+
+        self.assertIn(
+            "Archivo demasiado grande",
+            str(contexto.exception),
+        )
+
+
     # ================================================================
     # QA DETERMINÍSTICO
     # ================================================================
