@@ -118,6 +118,9 @@ class ProjectConfig:
 
     max_file_size: int = 300000
 
+    # Número máximo de archivos que una propuesta autónoma puede modificar.
+    max_files_per_proposal: int = 50
+
     allowed_extensions: List[str] = field(
         default_factory=lambda: [
             ".py",
@@ -1807,6 +1810,11 @@ DEVUELVE ÚNICAMENTE JSON:
         if "test_proyecto.py" not in archivos:
             raise ValueError(
                 "La propuesta del implementador debe incluir test_proyecto.py."
+            )
+
+        if len(archivos) > self.config.max_files_per_proposal:
+            raise ValueError(
+                "La propuesta contiene demasiados archivos."
             )
 
         for ruta, contenido in archivos.items():

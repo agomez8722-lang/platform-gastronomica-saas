@@ -1880,6 +1880,39 @@ def main():
             str(contexto.exception),
         )
 
+    def test_validar_propuesta_rechaza_demasiados_archivos(self):
+        self.agent.config.max_files_per_proposal = 2
+
+        archivos = {
+            "main.py": "def main():\n    pass\n",
+            "test_proyecto.py": "def test_ok():\n    assert True\n",
+            "extra.py": "def extra():\n    pass\n",
+        }
+
+        with self.assertRaises(ValueError) as contexto:
+            self.agent.validar_propuesta(
+                archivos
+            )
+
+        self.assertIn(
+            "demasiados archivos",
+            str(contexto.exception),
+        )
+
+
+    def test_validar_propuesta_acepta_archivos_dentro_del_limite(self):
+        self.agent.config.max_files_per_proposal = 2
+
+        archivos = {
+            "main.py": "def main():\n    pass\n",
+            "test_proyecto.py": "def test_ok():\n    assert True\n",
+        }
+
+        self.agent.validar_propuesta(
+            archivos
+        )
+
+
     # ================================================================
     # QA DETERMINÍSTICO
     # ================================================================
