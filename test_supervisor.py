@@ -2543,3 +2543,508 @@ def main():
                     self.agent.consolidar(propuesta)
         finally:
             os.replace = original_replace
+
+
+    # ================================================================
+    # OLLAMA LOCAL - HEALTH CHECK Y STREAMING
+    # ================================================================
+
+    def test_ollama_health_check_exitoso(self):
+        from unittest.mock import patch
+
+        class RespuestaMock:
+            status_code = 200
+
+            def json(self):
+                return {
+                    "models": [
+                        {"name": "qwen2.5-coder:3b"},
+                        {"name": "qwen2.5-coder:7b"},
+                    ]
+                }
+
+        with patch(
+            "supervisor.requests.get",
+            return_value=RespuestaMock(),
+        ) as mock_get:
+
+            modelos = self.agent.verificar_ollama()
+
+        self.assertEqual(
+            modelos,
+            [
+                "qwen2.5-coder:3b",
+                "qwen2.5-coder:7b",
+            ],
+        )
+
+        mock_get.assert_called_once_with(
+            self.agent.config.ollama_tags_url,
+            timeout=5,
+        )
+
+
+    def test_ollama_health_check_rechaza_conexion(self):
+        from unittest.mock import patch
+        import requests
+
+        with patch(
+            "supervisor.requests.get",
+            side_effect=requests.exceptions.ConnectionError(
+                "conexión rechazada"
+            ),
+        ):
+
+            with self.assertRaises(RuntimeError) as contexto:
+                self.agent.verificar_ollama()
+
+        self.assertIn(
+            "Ollama no está disponible",
+            str(contexto.exception),
+        )
+
+
+    def test_ollama_health_check_rechaza_timeout(self):
+        from unittest.mock import patch
+        import requests
+
+        with patch(
+            "supervisor.requests.get",
+            side_effect=requests.exceptions.Timeout(
+                "timeout simulado"
+            ),
+        ):
+
+            with self.assertRaises(RuntimeError) as contexto:
+                self.agent.verificar_ollama()
+
+        self.assertIn(
+            "Ollama no respondió al health-check",
+            str(contexto.exception),
+        )
+
+
+    def test_ollama_health_check_rechaza_http_no_exitoso(self):
+        from unittest.mock import patch
+
+        class RespuestaMock:
+            status_code = 500
+            text = "error interno"
+
+        with patch(
+            "supervisor.requests.get",
+            return_value=RespuestaMock(),
+        ):
+
+            with self.assertRaises(RuntimeError) as contexto:
+                self.agent.verificar_ollama()
+
+        self.assertIn(
+            "HTTP 500",
+            str(contexto.exception),
+        )
+
+
+    def test_ollama_health_check_rechaza_json_invalido(self):
+        from unittest.mock import patch
+
+        class RespuestaMock:
+            status_code = 200
+
+            def json(self):
+                raise ValueError(
+                    "JSON inválido simulado"
+                )
+
+        with patch(
+            "supervisor.requests.get",
+            return_value=RespuestaMock(),
+        ):
+
+            with self.assertRaises(RuntimeError) as contexto:
+                self.agent.verificar_ollama()
+
+        self.assertIn(
+            "respuesta no JSON",
+            str(contexto.exception),
+        )
+
+
+    def test_ollama_consulta_streaming_exitoso(self):
+        from unittest.mock import patch
+
+        class RespuestaMock:
+            status_code = 200
+            text = ""
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"Hola","done":false}',
+                    b'{"response":" desde","done":false}',
+                    b'{"response":" Ollama","done":false}',
+                    b'{"response":" local","done":true}',
+                ]
+
+        prompt = "Responde con un saludo."
+
+        with patch(
+            "supervisor.requests.post",
+            return_value=RespuestaMock(),
+        ) as mock_post:
+
+            resultado = self.agent.consultar_ollama(
+                prompt,
+                rol="qa",
+            )
+
+        self.assertEqual(
+            resultado,
+            "Hola desde Ollama local",
+        )
+
+        mock_post.assert_called_once()
+
+        args, kwargs = mock_post.call_args
+
+        self.assertEqual(
+            args[0],
+            self.agent.config.ollama_url,
+        )
+
+        self.assertEqual(
+            kwargs["json"]["model"],
+            self.agent.config.model_rapido,
+        )
+
+        self.assertEqual(
+            kwargs["json"]["prompt"],
+            prompt,
+        )
+
+        self.assertTrue(
+            kwargs["json"]["stream"],
+        )
+
+        self.assertEqual(
+            kwargs["json"]["format"],
+            "json",
+        )
+
+        self.assertEqual(
+            kwargs["json"]["options"]["temperature"],
+            0.1,
+        )
+
+        self.assertEqual(
+            kwargs["json"]["options"]["top_p"],
+            0.9,
+        )
+
+        self.assertEqual(
+            kwargs["json"]["options"]["repeat_penalty"],
+            1.1,
+        )
+
+        self.assertEqual(
+            kwargs["timeout"],
+            (
+                10,
+                self.agent.config.timeout_qa,
+            ),
+        )
+
+        self.assertTrue(
+            kwargs["stream"],
+        )
+
+    def test_ollama_connection_error_reintenta_y_recupera(self):
+        from unittest.mock import patch
+        import requests
+
+        class RespuestaMock:
+            status_code = 200
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"recuperado","done":true}',
+                ]
+
+        efectos = [
+            requests.exceptions.ConnectionError(
+                "conexion fallida"
+            ),
+            RespuestaMock(),
+        ]
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=efectos,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            resultado = self.agent.consultar_ollama(
+                "prueba conexion",
+                rol="qa",
+            )
+
+        self.assertEqual(
+            resultado,
+            "recuperado",
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            2,
+        )
+
+        mock_sleep.assert_called_once_with(
+            self.agent.config.ollama_retry_backoff,
+        )
+
+
+    def test_ollama_timeout_reintenta_y_recupera(self):
+        from unittest.mock import patch
+        import requests
+
+        class RespuestaMock:
+            status_code = 200
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"recuperado","done":true}',
+                ]
+
+        efectos = [
+            requests.exceptions.Timeout(
+                "timeout simulado"
+            ),
+            RespuestaMock(),
+        ]
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=efectos,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            resultado = self.agent.consultar_ollama(
+                "prueba timeout",
+                rol="qa",
+            )
+
+        self.assertEqual(
+            resultado,
+            "recuperado",
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            2,
+        )
+
+        mock_sleep.assert_called_once_with(
+            self.agent.config.ollama_retry_backoff,
+        )
+
+
+    def test_ollama_http_error_reintenta_y_recupera(self):
+        from unittest.mock import patch
+
+        class RespuestaError:
+            status_code = 500
+            text = "error interno"
+
+        class RespuestaOK:
+            status_code = 200
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"recuperado","done":true}',
+                ]
+
+        efectos = [
+            RespuestaError(),
+            RespuestaOK(),
+        ]
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=efectos,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            resultado = self.agent.consultar_ollama(
+                "prueba http",
+                rol="qa",
+            )
+
+        self.assertEqual(
+            resultado,
+            "recuperado",
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            2,
+        )
+
+        mock_sleep.assert_called_once_with(
+            self.agent.config.ollama_retry_backoff,
+        )
+
+
+    def test_ollama_streaming_interrumpido_reintenta_y_recupera(self):
+        from unittest.mock import patch
+        import requests
+
+        class RespuestaInterrumpida:
+            status_code = 200
+
+            def iter_lines(self):
+                yield b'{"response":"parcial","done":false}'
+                raise requests.exceptions.ChunkedEncodingError(
+                    "stream roto"
+                )
+
+        class RespuestaOK:
+            status_code = 200
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"recuperado","done":true}',
+                ]
+
+        efectos = [
+            RespuestaInterrumpida(),
+            RespuestaOK(),
+        ]
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=efectos,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            resultado = self.agent.consultar_ollama(
+                "prueba streaming",
+                rol="qa",
+            )
+
+        self.assertEqual(
+            resultado,
+            "recuperado",
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            2,
+        )
+
+        mock_sleep.assert_called_once_with(
+            self.agent.config.ollama_retry_backoff,
+        )
+
+
+    def test_ollama_respuesta_vacia_reintenta_y_recupera(self):
+        from unittest.mock import patch
+
+        class RespuestaVacia:
+            status_code = 200
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"","done":true}',
+                ]
+
+        class RespuestaOK:
+            status_code = 200
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"recuperado","done":true}',
+                ]
+
+        efectos = [
+            RespuestaVacia(),
+            RespuestaOK(),
+        ]
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=efectos,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            resultado = self.agent.consultar_ollama(
+                "prueba respuesta vacia",
+                rol="qa",
+            )
+
+        self.assertEqual(
+            resultado,
+            "recuperado",
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            2,
+        )
+
+        mock_sleep.assert_called_once_with(
+            self.agent.config.ollama_retry_backoff,
+        )
+
+
+    def test_ollama_agotados_todos_los_reintentos_lanza_error(self):
+        from unittest.mock import patch
+        import requests
+
+        error = requests.exceptions.ConnectionError(
+            "Ollama no disponible"
+        )
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=error,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            with self.assertRaises(RuntimeError) as contexto:
+                self.agent.consultar_ollama(
+                    "prueba agotamiento",
+                    rol="qa",
+                )
+
+        self.assertIn(
+            "No se pudo conectar con Ollama",
+            str(contexto.exception),
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            self.agent.config.ollama_max_retries,
+        )
+
+        self.assertEqual(
+            mock_sleep.call_count,
+            self.agent.config.ollama_max_retries - 1,
+        )
+
+        esperas = [
+            llamada.args[0]
+            for llamada in mock_sleep.call_args_list
+        ]
+
+        self.assertEqual(
+            esperas,
+            [
+                self.agent.config.ollama_retry_backoff,
+                self.agent.config.ollama_retry_backoff * 2,
+            ],
+        )
