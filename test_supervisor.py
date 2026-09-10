@@ -667,6 +667,60 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_crear_backup_no_reutiliza_directorio_en_colision(self):
+        main = self.target / "main.py"
+
+        main.write_text(
+            "VERSION = 1\\n",
+            encoding="utf-8",
+        )
+
+        import supervisor
+        from datetime import datetime
+        from unittest.mock import patch
+
+        instante = datetime(
+            2026,
+            1,
+            2,
+            3,
+            4,
+            5,
+            123456,
+        )
+
+        with patch.object(
+            supervisor,
+            "datetime",
+        ) as datetime_mock:
+            datetime_mock.now.return_value = instante
+
+            backup_1 = self.agent.crear_backup(
+                ["main.py"]
+            )
+
+            backup_2 = self.agent.crear_backup(
+                ["main.py"]
+            )
+
+        self.assertNotEqual(
+            backup_1,
+            backup_2,
+        )
+
+        self.assertTrue(
+            (backup_1 / "main.py").exists()
+        )
+
+        self.assertTrue(
+            (backup_2 / "main.py").exists()
+        )
+
+        self.assertTrue(
+            backup_2.name.endswith("_1")
+        )
+
+
     def test_crear_backup_falla_sin_dejar_backup_parcial(self):
         import shutil
 

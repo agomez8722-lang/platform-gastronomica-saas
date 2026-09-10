@@ -2162,7 +2162,7 @@ DEVUELVE ÚNICAMENTE JSON:
     ) -> Path:
 
         timestamp = datetime.now().strftime(
-            "%Y%m%d_%H%M%S"
+            "%Y%m%d_%H%M%S_%f"
         )
 
         destino = (
@@ -2170,10 +2170,30 @@ DEVUELVE ÚNICAMENTE JSON:
             / timestamp
         )
 
-        destino.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        try:
+            destino.mkdir(
+                parents=True,
+                exist_ok=False,
+            )
+
+        except FileExistsError:
+            indice = 1
+
+            while True:
+                destino = (
+                    self.backup_dir
+                    / f"{timestamp}_{indice}"
+                )
+
+                try:
+                    destino.mkdir(
+                        parents=True,
+                        exist_ok=False,
+                    )
+                    break
+
+                except FileExistsError:
+                    indice += 1
 
         try:
 
