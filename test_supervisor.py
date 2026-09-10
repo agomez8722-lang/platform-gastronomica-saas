@@ -1872,6 +1872,239 @@ def main():
         )
 
     # ================================================================
+    # EJECUTAR TESTS - CASOS DE ERROR Y VERIFICACION DE IMPORT
+    # ================================================================
+
+    def test_ejecutar_tests_sin_test_proyecto_rechaza(self):
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+
+            aprobado, detalle = self.agent.ejecutar_tests(
+                sandbox
+            )
+
+        self.assertFalse(aprobado)
+        self.assertEqual(
+            detalle,
+            "No existe test_proyecto.py.",
+        )
+
+
+    def test_ejecutar_tests_timeout_explicitamente_rechaza(self):
+        from unittest.mock import patch
+        import subprocess
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+            (sandbox / "test_proyecto.py").write_text(
+                "import unittest\n"
+                "class TestOK(unittest.TestCase):\n"
+                "    def test_ok(self):\n"
+                "        pass\n",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "supervisor.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(
+                    cmd=["python", "-m", "unittest"],
+                    timeout=1,
+                ),
+            ):
+                aprobado, detalle = self.agent.ejecutar_tests(
+                    sandbox
+                )
+
+        self.assertFalse(aprobado)
+        self.assertEqual(
+            detalle,
+            "La suite superó el tiempo máximo.",
+        )
+
+
+    def test_ejecutar_tests_oserror_rechaza(self):
+        from unittest.mock import patch
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+            (sandbox / "test_proyecto.py").write_text(
+                "import unittest\n",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "supervisor.subprocess.run",
+                side_effect=OSError(
+                    "python no disponible"
+                ),
+            ):
+                aprobado, detalle = self.agent.ejecutar_tests(
+                    sandbox
+                )
+
+        self.assertFalse(aprobado)
+        self.assertIn(
+            "No se pudo ejecutar unittest",
+            detalle,
+        )
+
+
+    def test_import_main_con_efecto_secundario_es_rechazado(self):
+        from unittest.mock import patch
+        from tempfile import TemporaryDirectory
+
+        class ResultadoUnittest:
+            returncode = 0
+            stdout = "OK"
+            stderr = ""
+
+        class ResultadoImport:
+            returncode = 2
+            stdout = (
+                "EFECTO SECUNDARIO DETECTADO: "
+                "import main incrementó registros"
+            )
+            stderr = ""
+
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+
+            (sandbox / "test_proyecto.py").write_text(
+                "import unittest\n"
+                "class TestOK(unittest.TestCase):\n"
+                "    def test_ok(self):\n"
+                "        pass\n",
+                encoding="utf-8",
+            )
+
+            (sandbox / "main.py").write_text(
+                "REGISTRO = True\n",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "supervisor.subprocess.run",
+                side_effect=[
+                    ResultadoUnittest(),
+                    ResultadoImport(),
+                ],
+            ) as mock_run:
+
+                aprobado, detalle = self.agent.ejecutar_tests(
+                    sandbox
+                )
+
+        self.assertFalse(aprobado)
+        self.assertIn(
+            "Rechazo en verificación de import main",
+            detalle,
+        )
+        self.assertEqual(
+            mock_run.call_count,
+            2,
+        )
+
+
+    def test_import_main_exitoso_no_rechaza(self):
+        from unittest.mock import patch
+        from tempfile import TemporaryDirectory
+
+        class ResultadoOK:
+            returncode = 0
+            stdout = "OK"
+            stderr = ""
+
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+
+            (sandbox / "test_proyecto.py").write_text(
+                "import unittest\n"
+                "class TestOK(unittest.TestCase):\n"
+                "    def test_ok(self):\n"
+                "        pass\n",
+                encoding="utf-8",
+            )
+
+            (sandbox / "main.py").write_text(
+                "VALUE = 42\n",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "supervisor.subprocess.run",
+                side_effect=[
+                    ResultadoOK(),
+                    ResultadoOK(),
+                ],
+            ) as mock_run:
+
+                aprobado, detalle = self.agent.ejecutar_tests(
+                    sandbox
+                )
+
+        self.assertTrue(aprobado)
+        self.assertEqual(
+            detalle,
+            "OK",
+        )
+        self.assertEqual(
+            mock_run.call_count,
+            2,
+        )
+
+
+    def test_import_main_timeout_es_rechazado(self):
+        from unittest.mock import patch
+        import subprocess
+        from tempfile import TemporaryDirectory
+
+        class ResultadoOK:
+            returncode = 0
+            stdout = "OK"
+            stderr = ""
+
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+
+            (sandbox / "test_proyecto.py").write_text(
+                "import unittest\n"
+                "class TestOK(unittest.TestCase):\n"
+                "    def test_ok(self):\n"
+                "        pass\n",
+                encoding="utf-8",
+            )
+
+            (sandbox / "main.py").write_text(
+                "VALUE = 42\n",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "supervisor.subprocess.run",
+                side_effect=[
+                    ResultadoOK(),
+                    subprocess.TimeoutExpired(
+                        cmd=["python", "-c", "import main"],
+                        timeout=15,
+                    ),
+                ],
+            ):
+                aprobado, detalle = self.agent.ejecutar_tests(
+                    sandbox
+                )
+
+        self.assertFalse(aprobado)
+        self.assertIn(
+            "Error comprobando efectos secundarios de import main",
+            detalle,
+        )
+
+
+    # ================================================================
     # SELECCIÓN DE MODELOS
     # ================================================================
 
