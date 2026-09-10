@@ -3048,3 +3048,220 @@ def main():
                 self.agent.config.ollama_retry_backoff * 2,
             ],
         )
+
+    def test_ollama_request_exception_reintenta_y_recupera(self):
+        from unittest.mock import patch
+        import requests
+
+        class RespuestaOK:
+            status_code = 200
+
+            def iter_lines(self):
+                return [
+                    b'{"response":"recuperado","done":true}',
+                ]
+
+        efectos = [
+            requests.exceptions.RequestException(
+                "error de red generico"
+            ),
+            RespuestaOK(),
+        ]
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=efectos,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            resultado = self.agent.consultar_ollama(
+                "prueba request exception",
+                rol="qa",
+            )
+
+        self.assertEqual(
+            resultado,
+            "recuperado",
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            2,
+        )
+
+        mock_sleep.assert_called_once_with(
+            self.agent.config.ollama_retry_backoff,
+        )
+
+
+    def test_ollama_backoff_exponencial_usa_2_y_4_segundos(self):
+        from unittest.mock import patch
+        import requests
+
+        error = requests.exceptions.ConnectionError(
+            "conexion fallida"
+        )
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=error,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            with self.assertRaises(RuntimeError):
+                self.agent.consultar_ollama(
+                    "prueba backoff",
+                    rol="qa",
+                )
+
+        self.assertEqual(
+            mock_post.call_count,
+            self.agent.config.ollama_max_retries,
+        )
+
+        esperas = [
+            llamada.args[0]
+            for llamada in mock_sleep.call_args_list
+        ]
+
+        self.assertEqual(
+            esperas,
+            [
+                self.agent.config.ollama_retry_backoff,
+                self.agent.config.ollama_retry_backoff * 2,
+            ],
+        )
+
+
+    def test_ollama_no_hace_sleep_despues_del_ultimo_intento(self):
+        from unittest.mock import patch
+        import requests
+
+        error = requests.exceptions.ConnectionError(
+            "conexion fallida"
+        )
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=error,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            with self.assertRaises(RuntimeError):
+                self.agent.consultar_ollama(
+                    "prueba ultimo intento",
+                    rol="qa",
+                )
+
+        self.assertEqual(
+            mock_post.call_count,
+            self.agent.config.ollama_max_retries,
+        )
+
+        self.assertEqual(
+            mock_sleep.call_count,
+            self.agent.config.ollama_max_retries - 1,
+        )
+
+
+    def test_ollama_reintentos_configurables(self):
+        from unittest.mock import patch
+        import requests
+
+        self.agent.config.ollama_max_retries = 1
+
+        error = requests.exceptions.ConnectionError(
+            "conexion fallida"
+        )
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=error,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            with self.assertRaises(RuntimeError):
+                self.agent.consultar_ollama(
+                    "prueba un solo intento",
+                    rol="qa",
+                )
+
+        self.assertEqual(
+            mock_post.call_count,
+            1,
+        )
+
+        mock_sleep.assert_not_called()
+
+
+    def test_ollama_backoff_respeta_valor_configurado(self):
+        from unittest.mock import patch
+        import requests
+
+        self.agent.config.ollama_retry_backoff = 0.25
+
+        error = requests.exceptions.ConnectionError(
+            "conexion fallida"
+        )
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=error,
+        ), patch(
+            "supervisor.time.sleep"
+        ) as mock_sleep:
+
+            with self.assertRaises(RuntimeError):
+                self.agent.consultar_ollama(
+                    "prueba backoff configurado",
+                    rol="qa",
+                )
+
+        esperas = [
+            llamada.args[0]
+            for llamada in mock_sleep.call_args_list
+        ]
+
+        self.assertEqual(
+            esperas,
+            [
+                0.25,
+                0.5,
+            ],
+        )
+
+
+    def test_ollama_request_exception_agotada_conserva_error_generico(self):
+        from unittest.mock import patch
+        import requests
+
+        error = requests.exceptions.RequestException(
+            "servidor no responde"
+        )
+
+        with patch(
+            "supervisor.requests.post",
+            side_effect=error,
+        ) as mock_post, patch(
+            "supervisor.time.sleep"
+        ):
+
+            with self.assertRaises(RuntimeError) as contexto:
+                self.agent.consultar_ollama(
+                    "prueba request exception agotada",
+                    rol="qa",
+                )
+
+        self.assertIn(
+            "Error de red comunicando con Ollama",
+            str(contexto.exception),
+        )
+
+        self.assertEqual(
+            mock_post.call_count,
+            self.agent.config.ollama_max_retries,
+        )
