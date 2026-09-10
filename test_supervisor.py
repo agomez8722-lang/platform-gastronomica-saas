@@ -89,6 +89,35 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_ruta_segura_rechaza_symlink_fuera_del_proyecto(self):
+        fuera = self.target.parent / "fuera_symlink_target.py"
+
+        fuera.write_text(
+            "SECRETO = True\\n",
+            encoding="utf-8",
+        )
+
+        enlace = self.target / "enlace.py"
+
+        try:
+            enlace.symlink_to(fuera)
+
+            with self.assertRaises(ValueError) as contexto:
+                self.agent.ruta_segura("enlace.py")
+
+            self.assertIn(
+                "Ruta fuera del proyecto",
+                str(contexto.exception),
+            )
+
+        finally:
+            if enlace.is_symlink():
+                enlace.unlink()
+
+            if fuera.exists():
+                fuera.unlink()
+
+
     def test_ruta_segura_acepta_ruta_normal(self):
         resultado = self.agent.ruta_segura("src/main.py")
 
@@ -96,6 +125,77 @@ class TestSupremeTDDAgent(unittest.TestCase):
             resultado,
             (self.target / "src" / "main.py").resolve(),
         )
+
+
+    def test_ruta_segura_acepta_symlink_dentro_del_proyecto(self):
+        destino = self.target / "real.py"
+
+        destino.write_text(
+            "VERSION = 1\\n",
+            encoding="utf-8",
+        )
+
+        enlace = self.target / "enlace.py"
+
+        try:
+            enlace.symlink_to(destino)
+
+            resultado = self.agent.ruta_segura(
+                "enlace.py"
+            )
+
+            self.assertEqual(
+                resultado,
+                destino.resolve(),
+            )
+
+        finally:
+            if enlace.is_symlink():
+                enlace.unlink()
+
+            if destino.exists():
+                destino.unlink()
+
+
+    def test_ruta_segura_rechaza_symlink_en_directorio_intermedio_fuera_del_proyecto(self):
+        fuera = self.target.parent / "fuera"
+
+        fuera.mkdir()
+
+        archivo = fuera / "secreto.py"
+
+        archivo.write_text(
+            "SECRETO = True\\n",
+            encoding="utf-8",
+        )
+
+        enlace_dir = self.target / "subdir"
+
+        try:
+            enlace_dir.symlink_to(
+                fuera,
+                target_is_directory=True,
+            )
+
+            with self.assertRaises(ValueError) as contexto:
+                self.agent.ruta_segura(
+                    "subdir/secreto.py"
+                )
+
+            self.assertIn(
+                "Ruta fuera del proyecto",
+                str(contexto.exception),
+            )
+
+        finally:
+            if enlace_dir.is_symlink():
+                enlace_dir.unlink()
+
+            if archivo.exists():
+                archivo.unlink()
+
+            if fuera.exists():
+                fuera.rmdir()
 
 
     def test_ruta_segura_acepta_ruta_normalizada_interna(self):
