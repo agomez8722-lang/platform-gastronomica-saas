@@ -777,6 +777,66 @@ class TestSupremeTDDAgent(unittest.TestCase):
 
 
 
+    def test_crear_backup_conserva_error_original_si_falla_limpieza(self):
+        import shutil
+
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+
+        main.write_text(
+            "VERSION = 1\\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = True\\n",
+            encoding="utf-8",
+        )
+
+        original_copy2 = shutil.copy2
+        original_rmtree = shutil.rmtree
+
+        llamadas = {"copy2": 0}
+
+        def copy2_fallido(origen, destino):
+            llamadas["copy2"] += 1
+
+            if llamadas["copy2"] == 2:
+                raise OSError(
+                    "Error original durante segundo backup"
+                )
+
+            return original_copy2(
+                origen,
+                destino,
+            )
+
+        def rmtree_fallido(ruta):
+            raise OSError(
+                "Error simulado limpiando backup parcial"
+            )
+
+        shutil.copy2 = copy2_fallido
+        shutil.rmtree = rmtree_fallido
+
+        try:
+            with self.assertRaises(OSError) as contexto:
+                self.agent.crear_backup(
+                    [
+                        "main.py",
+                        "config.py",
+                    ]
+                )
+        finally:
+            shutil.copy2 = original_copy2
+            shutil.rmtree = original_rmtree
+
+        self.assertEqual(
+            str(contexto.exception),
+            "Error original durante segundo backup",
+        )
+
+
     def test_consolidar_falla_antes_de_modificar_si_backup_falla(self):
         main = self.target / "main.py"
 
