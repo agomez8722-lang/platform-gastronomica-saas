@@ -68,8 +68,17 @@ class TestGitState(unittest.TestCase):
             1,
         )
 
-        self.assertTrue(
-            state.recent_commits[0].startswith("3c5482f"),
+        expected_head = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        self.assertEqual(
+            state.recent_commits[0],
+            expected_head,
         )
 
     def test_obtiene_tags(self):
