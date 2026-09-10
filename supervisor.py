@@ -742,9 +742,9 @@ class SupremeTDDAgent:
 
         target = self.target_path.resolve()
 
-        candidato = (
-            target / relativa
-        ).resolve()
+        ruta_original = target / relativa
+
+        candidato = ruta_original.resolve()
 
         try:
 
@@ -757,6 +757,20 @@ class SupremeTDDAgent:
             raise ValueError(
                 f"Ruta fuera del proyecto: {relativa}"
             ) from error
+
+        actual = target
+
+        partes = Path(relativa).parts
+
+        for parte in partes:
+
+            actual = actual / parte
+
+            if actual.is_symlink():
+
+                raise ValueError(
+                    f"No se permiten enlaces simbólicos: {relativa}"
+                )
 
         if candidato.name.startswith("."):
 

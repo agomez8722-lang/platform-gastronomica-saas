@@ -101,7 +101,7 @@ class TestTestState(unittest.TestCase):
 
         state = inspect_tests(PROJECT_ROOT)
 
-        self.assertEqual(state.total, 119)
+        self.assertEqual(state.total, 122)
         self.assertEqual(state.failed, 0)
         self.assertEqual(state.passed, state.total)
         self.assertTrue(state.success)

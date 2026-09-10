@@ -127,34 +127,32 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
-    def test_ruta_segura_acepta_symlink_dentro_del_proyecto(self):
-        destino = self.target / "real.py"
+    def test_ruta_segura_rechaza_symlink_dentro_del_proyecto(self):
+        real = self.target / "real.py"
+        enlace = self.target / "enlace.py"
 
-        destino.write_text(
-            "VERSION = 1\\n",
+        real.write_text(
+            "VALOR = 1\\n",
             encoding="utf-8",
         )
 
-        enlace = self.target / "enlace.py"
+        enlace.symlink_to(real)
 
         try:
-            enlace.symlink_to(destino)
+            with self.assertRaises(ValueError) as contexto:
+                self.agent.ruta_segura("enlace.py")
 
-            resultado = self.agent.ruta_segura(
-                "enlace.py"
-            )
-
-            self.assertEqual(
-                resultado,
-                destino.resolve(),
+            self.assertIn(
+                "enlaces simbólicos",
+                str(contexto.exception),
             )
 
         finally:
             if enlace.is_symlink():
                 enlace.unlink()
 
-            if destino.exists():
-                destino.unlink()
+            if real.exists():
+                real.unlink()
 
 
     def test_ruta_segura_rechaza_symlink_en_directorio_intermedio_fuera_del_proyecto(self):
@@ -765,6 +763,130 @@ class TestSupremeTDDAgent(unittest.TestCase):
         self.assertFalse(
             (self.target / "nuevo.py").exists()
         )
+
+
+    def test_crear_backup_rechaza_symlink_dentro_del_proyecto(self):
+        real = self.target / "real.py"
+        enlace = self.target / "enlace.py"
+
+        real.write_text(
+            "SECRETO = True\\n",
+            encoding="utf-8",
+        )
+
+        enlace.symlink_to(real)
+
+        try:
+            with self.assertRaises(ValueError) as contexto:
+                self.agent.crear_backup(
+                    ["enlace.py"]
+                )
+
+            self.assertIn(
+                "enlaces simbólicos",
+                str(contexto.exception),
+            )
+
+            self.assertEqual(
+                list(self.agent.backup_dir.iterdir()),
+                [],
+            )
+
+        finally:
+            if enlace.is_symlink():
+                enlace.unlink()
+
+            if real.exists():
+                real.unlink()
+
+
+    def test_crear_backup_rechaza_symlink_en_directorio_intermedio(self):
+        real_dir = self.target.parent / "real_backup_dir"
+        enlace_dir = self.target / "subdir"
+
+        real_dir.mkdir()
+
+        secreto = real_dir / "secreto.py"
+
+        secreto.write_text(
+            "SECRETO = True\\n",
+            encoding="utf-8",
+        )
+
+        enlace_dir.symlink_to(
+            real_dir,
+            target_is_directory=True,
+        )
+
+        try:
+            with self.assertRaises(ValueError) as contexto:
+                self.agent.crear_backup(
+                    ["subdir/secreto.py"]
+                )
+
+            mensaje = str(contexto.exception)
+
+            self.assertTrue(
+                "enlaces simbólicos" in mensaje
+                or "Ruta fuera del proyecto" in mensaje
+            )
+
+            self.assertEqual(
+                list(self.agent.backup_dir.iterdir()),
+                [],
+            )
+
+        finally:
+            if enlace_dir.is_symlink():
+                enlace_dir.unlink()
+
+            if secreto.exists():
+                secreto.unlink()
+
+            if real_dir.exists():
+                real_dir.rmdir()
+
+
+    def test_crear_backup_no_deja_backup_parcial_si_detecta_symlink(self):
+        main = self.target / "main.py"
+        real = self.target / "real.py"
+        enlace = self.target / "enlace.py"
+
+        main.write_text(
+            "VERSION = 1\\n",
+            encoding="utf-8",
+        )
+
+        real.write_text(
+            "SECRETO = True\\n",
+            encoding="utf-8",
+        )
+
+        enlace.symlink_to(real)
+
+        try:
+            with self.assertRaises(ValueError):
+                self.agent.crear_backup(
+                    [
+                        "main.py",
+                        "enlace.py",
+                    ]
+                )
+
+            self.assertEqual(
+                list(self.agent.backup_dir.iterdir()),
+                [],
+            )
+
+        finally:
+            if enlace.is_symlink():
+                enlace.unlink()
+
+            if main.exists():
+                main.unlink()
+
+            if real.exists():
+                real.unlink()
 
 
     def test_crear_backup_no_reutiliza_directorio_en_colision(self):
