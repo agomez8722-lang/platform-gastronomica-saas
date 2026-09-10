@@ -1933,6 +1933,115 @@ def main():
 
 
     # ================================================================
+    # SEGURIDAD DEL SANDBOX
+    # ================================================================
+
+    def test_escribir_propuesta_rechaza_symlink_fuera_del_sandbox(self):
+        sandbox = self.target / "sandbox_test"
+        sandbox.mkdir()
+
+        fuera = self.target.parent / "fuera_propuesta.py"
+
+        fuera.write_text(
+            "SECRETO = True\n",
+            encoding="utf-8",
+        )
+
+        enlace = sandbox / "enlace.py"
+
+        try:
+            enlace.symlink_to(fuera)
+
+            with self.assertRaises(ValueError) as contexto:
+                self.agent.escribir_propuesta(
+                    sandbox,
+                    {
+                        "enlace.py": "MODIFICADO = True\n",
+                    },
+                )
+
+            self.assertIn(
+                "enlaces simbólicos",
+                str(contexto.exception),
+            )
+
+            self.assertEqual(
+                fuera.read_text(
+                    encoding="utf-8"
+                ),
+                "SECRETO = True\n",
+            )
+
+        finally:
+            if enlace.is_symlink():
+                enlace.unlink()
+
+            if fuera.exists():
+                fuera.unlink()
+
+            if sandbox.exists():
+                sandbox.rmdir()
+
+
+    def test_escribir_propuesta_rechaza_symlink_en_directorio_intermedio(self):
+        sandbox = self.target / "sandbox_test"
+        sandbox.mkdir()
+
+        fuera = self.target.parent / "fuera_propuesta_dir"
+        fuera.mkdir()
+
+        secreto = fuera / "secreto.py"
+
+        secreto.write_text(
+            "SECRETO = True\n",
+            encoding="utf-8",
+        )
+
+        enlace_dir = sandbox / "subdir"
+
+        try:
+            enlace_dir.symlink_to(
+                fuera,
+                target_is_directory=True,
+            )
+
+            with self.assertRaises(ValueError) as contexto:
+                self.agent.escribir_propuesta(
+                    sandbox,
+                    {
+                        "subdir/secreto.py": (
+                            "MODIFICADO = True\n"
+                        ),
+                    },
+                )
+
+            self.assertIn(
+                "enlaces simbólicos",
+                str(contexto.exception),
+            )
+
+            self.assertEqual(
+                secreto.read_text(
+                    encoding="utf-8"
+                ),
+                "SECRETO = True\n",
+            )
+
+        finally:
+            if enlace_dir.is_symlink():
+                enlace_dir.unlink()
+
+            if secreto.exists():
+                secreto.unlink()
+
+            if fuera.exists():
+                fuera.rmdir()
+
+            if sandbox.exists():
+                sandbox.rmdir()
+
+
+    # ================================================================
     # QA DETERMINÍSTICO
     # ================================================================
 

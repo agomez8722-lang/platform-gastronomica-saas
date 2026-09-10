@@ -740,14 +740,16 @@ class SupremeTDDAgent:
                 "Ruta vacía."
             )
 
+        target = self.target_path.resolve()
+
         candidato = (
-            self.target_path / relativa
+            target / relativa
         ).resolve()
 
         try:
 
             candidato.relative_to(
-                self.target_path
+                target
             )
 
         except ValueError as error:
@@ -1950,18 +1952,34 @@ DEVUELVE ÚNICAMENTE JSON:
         archivos: Dict[str, str],
     ) -> None:
 
+        sandbox = sandbox.resolve()
+
         for ruta, contenido in archivos.items():
 
             relativo = Path(ruta)
 
-            destino = (
-                sandbox / relativo
-            ).resolve()
+            if relativo.is_absolute():
+                raise ValueError(
+                    f"Ruta absoluta no permitida: {ruta}"
+                )
+
+            actual = sandbox
+
+            for parte in relativo.parts:
+
+                actual = actual / parte
+
+                if actual.is_symlink():
+                    raise ValueError(
+                        f"No se permiten enlaces simbólicos en el sandbox: {ruta}"
+                    )
+
+            destino = actual.resolve()
 
             try:
 
                 destino.relative_to(
-                    sandbox.resolve()
+                    sandbox
                 )
 
             except ValueError as error:
