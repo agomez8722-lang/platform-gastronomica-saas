@@ -872,6 +872,72 @@ class TestSupremeTDDAgent(unittest.TestCase):
         )
 
 
+    def test_consolidar_falla_al_crear_temporal_limpia_temporales_previos(self):
+        main = self.target / "main.py"
+        config = self.target / "config.py"
+
+        main.write_text(
+            "VERSION = 1\n",
+            encoding="utf-8",
+        )
+
+        config.write_text(
+            "DEBUG = False\n",
+            encoding="utf-8",
+        )
+
+        propuesta = {
+            "main.py": "VERSION = 2\n",
+            "config.py": "DEBUG = True\n",
+        }
+
+        path_type = type(self.target / "dummy")
+        original_write_text = path_type.write_text
+        llamadas = {"count": 0}
+
+        def write_text_fallido(self_path, contenido, *args, **kwargs):
+            llamadas["count"] += 1
+
+            if self_path.name == ".config.py.supreme.tmp":
+                raise OSError(
+                    "Error simulado creando segundo temporal"
+                )
+
+            return original_write_text(
+                self_path,
+                contenido,
+                *args,
+                **kwargs,
+            )
+
+        path_type.write_text = write_text_fallido
+
+        try:
+            with self.assertRaises(OSError):
+                self.agent.consolidar(propuesta)
+        finally:
+            path_type.write_text = original_write_text
+
+        self.assertFalse(
+            (self.target / ".main.py.supreme.tmp").exists()
+        )
+
+        self.assertFalse(
+            (self.target / ".config.py.supreme.tmp").exists()
+        )
+
+        self.assertEqual(
+            main.read_text(encoding="utf-8"),
+            "VERSION = 1\n",
+        )
+
+        self.assertEqual(
+            config.read_text(encoding="utf-8"),
+            "DEBUG = False\n",
+        )
+
+
+
     def test_consolidar_falla_si_no_puede_crear_temporal(self):
         main = self.target / "main.py"
 
