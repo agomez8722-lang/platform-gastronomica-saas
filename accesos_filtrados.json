@@ -1,0 +1,16 @@
+[
+  {
+    "usuario": "ana",
+    "rol": "admin",
+    "fecha": "2024-01-01",
+    "hora": "08:00:00",
+    "recurso": "/admin"
+  },
+  {
+    "usuario": "luis",
+    "rol": "admin",
+    "fecha": "2024-01-02",
+    "hora": "09:30:00",
+    "recurso": "/admin/dashboard"
+  }
+]

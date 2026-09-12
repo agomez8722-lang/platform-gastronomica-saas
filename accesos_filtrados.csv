@@ -1,0 +1,3 @@
+usuario,rol,fecha,hora,recurso
+ana,admin,2024-01-01,08:00:00,/admin
+luis,admin,2024-01-02,09:30:00,/admin/dashboard
