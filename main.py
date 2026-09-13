@@ -337,8 +337,11 @@ def calcular_fitness_real():
         out = result.stderr + result.stdout
         m = re.search(r"Ran (\d+) tests", out)
         total = int(m.group(1)) if m else 0
+        # Fix: contar solo fallos reales, no substrings en nombres de tests
+        # Buscar lineas que empiezan con FAIL: o ERROR: o resumen FAILED
         fails_real = len(re.findall(r"^(FAIL|ERROR):", out, re.MULTILINE))
         if "FAILED" in out:
+            # Extraer numero de fails del resumen FAILED (failures=X, errors=Y)
             m_fail = re.search(r"FAILED \(failures=(\d+)(?:, errors=(\d+))?\)", out)
             m_err = re.search(r"FAILED \(errors=(\d+)\)", out)
             if m_fail:
@@ -346,6 +349,7 @@ def calcular_fitness_real():
             elif m_err:
                 fails_real = int(m_err.group(1))
             elif fails_real == 0:
+                # Si hay FAILED pero no parseamos, contar 1
                 fails_real = 1
         else:
             fails_real = 0 if "OK" in out else fails_real
@@ -404,7 +408,7 @@ def proponer_siguiente_orden(auto_bloquear=True):
     ORDENES.write_text(texto, encoding="utf-8")
     with open(EVOLUCION_LOG, "a", encoding="utf-8") as f: f.write(f"{datetime.now().isoformat()} - {texto}\n---\n")
     logger.info(f"ORDENES NIVEL 9: {len(propuesta)} lineas, bloqueos={len(bloqueos_nuevos)}, parches={len(evo.get('parches',[]))}")
-    return {"anomalias":anomalias,"anomalias_log":anomalias_log,"bloqueos_nuevos":bloqueos_nuevos,"lista_negra":cargar_lista_negra(),"fitness":fitness,"texto":texto,"propuesta":propuesta,"rate_limit":get_rate_limit_stats()}
+    return {"anomalias":anomalias,"anomalias_log":anomalias_log,"bloqueos_nuevos":bloqueos_nuevos,"lista_negra":cargar_lista_negra(),"fitness":fitness,"texto":texto,"propuesta":propuesta,"rate_limit":get_rate_limit_stats(),"evolucion":evo,"ollama_disponible":ollama_disponible()}
 
 def main():
     datos = cargar_historico()
@@ -550,7 +554,7 @@ if __name__=="__main__":
         while True:
             try:
                 o=proponer_siguiente_orden(auto_bloquear=True)
-                print(f"[{datetime.now().isoformat()}] N9 {o['texto'][:120]} bloqueos={o['bloqueos_nuevos']} ollama={o['ollama_disponible']} evo={len(o.get('evolucion',{}).get('parches',[]))}")
+                print(f"[{datetime.now().isoformat()}] N9 {o['texto'][:120]} bloqueos={o.get('bloqueos_nuevos',[])} ollama={o.get('ollama_disponible', ollama_disponible())} evo={len(o.get('evolucion',{}).get('parches',[]))} fitness={o.get('fitness',{}).get('fitness',0)}")
                 time.sleep(30)
             except KeyboardInterrupt: break
     else:
