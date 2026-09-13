@@ -2,36 +2,41 @@
   {
     "usuario": "ana",
     "rol": "admin",
-    "fecha": "2024-01-01",
-    "hora": "08:00:00",
-    "recurso": "/admin"
+    "fecha": "2024-01-02",
+    "hora": "09:30:00",
+    "recurso": "/admin/dashboard",
+    "ip": "10.0.0.1"
   },
   {
     "usuario": "luis",
     "rol": "admin",
-    "fecha": "2024-01-02",
-    "hora": "09:30:00",
-    "recurso": "/admin/dashboard"
+    "fecha": "2024-01-01",
+    "hora": "08:00:00",
+    "recurso": "/admin/users",
+    "ip": "10.0.0.2"
   },
   {
     "usuario": "maria",
     "rol": "user",
     "fecha": "2024-01-03",
     "hora": "10:00:00",
-    "recurso": "/home"
+    "recurso": "/perfil",
+    "ip": "10.0.0.3"
   },
   {
-    "usuario": "pedro",
-    "rol": "auditor",
+    "usuario": "jose",
+    "rol": "user",
     "fecha": "2024-01-04",
-    "hora": "11:00:00",
-    "recurso": "/audit"
+    "hora": "22:15:00",
+    "recurso": "/admin/dashboard",
+    "ip": "10.0.0.4"
   },
   {
-    "usuario": "juan",
-    "rol": "invitado",
+    "usuario": "sofia",
+    "rol": "admin",
     "fecha": "2024-01-05",
-    "hora": "12:00:00",
-    "recurso": "/public"
+    "hora": "23:30:00",
+    "recurso": "/admin/config",
+    "ip": "10.0.0.5"
   }
 ]
