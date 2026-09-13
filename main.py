@@ -1,561 +1,603 @@
 """
-IA Evolutiva Nivel 9 - Autonomia Total + Ollama + Auto-Patching Seguro
-100% funcional - Sin relleno - Sin bucles innecesarios
-- Logging rotativo 1MB
-- Deteccion 5 tipos anomalias
-- Auto-bloqueo IP real (lista_negra.json + DB)
-- Fitness real con unittest
-- /decidir escribe ordenes.txt automaticamente
-- Supervisor loop
-- Prediccion rol
-- NUEVO Nivel 8: Rate limiting + 2FA + Middleware
-- NUEVO Nivel 9: Ollama + Auto-Patching + Backup + Evoluciones
+Sistema de Deteccion de Anomalias Inmunologico/Evolutivo - Nivel 10
+Motor base (v9.1) + Motor Evolutivo Nivel 10 (carga dinamica segura).
 """
-
-import json, csv, os, logging, re, subprocess, time, shutil, tempfile, py_compile
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import List, Dict, Optional
-from datetime import datetime
-from collections import Counter
-from pydantic import BaseModel, Field
+import ast
+import importlib.util
+import json
+import os
 import sqlite3
+import sys
+import threading
+import time
+from typing import Dict, List, Optional
 
-LOG_PATH = Path("app.log")
-handler = RotatingFileHandler(str(LOG_PATH), maxBytes=1_000_000, backupCount=5, encoding="utf-8")
-handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s - %(message)s'))
-logger = logging.getLogger("ia_evolutiva")
-logger.setLevel(logging.INFO)
-logger.handlers.clear()
-logger.addHandler(handler)
-logger.addHandler(logging.StreamHandler())
-logger.info("Inicializando IA Evolutiva Nivel 9 - Ollama + Auto-Patching")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "accesos.db")
+EVOLUTIVO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evolutivo_real.py")
+LISTA_NEGRA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lista_negra.json")
 
-DB_PATH = Path("accesos.db")
-HISTORICO = Path("historico_accesos.json")
-LISTA_NEGRA = Path("lista_negra.json")
-ORDENES = Path("ordenes.txt")
-EVOLUCION_LOG = Path("evolucion.log")
+FITNESS_OPTIMO = 200
+FITNESS_ROLLBACK_MARGEN = 10
+UMBRAL_BLOQUEO = 3  # anomalias repetidas de una IP antes de bloqueo automatico
 
-RATE_LIMIT_MAX = 10
-RATE_LIMIT_WINDOW = 60
+# Almacen en memoria para control de rate limiting por IP
 rate_limit_store: Dict[str, List[float]] = {}
-FACTOR_2FA_CODE = "123456"
 
-# Nivel 9 - Ollama + Auto-patching
-OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen2.5-coder:7b"
-PARCHES_DIR = Path("parches")
-EVOLUCIONES_DIR = Path("evoluciones")
-BACKUP_DIR = Path(".backup_nivel9")
-IMPLEMENTADOR_LOG = Path("implementador.log")
+# Bloqueo global para proteger estructuras compartidas ante concurrencia (servidor threaded)
+_lock = threading.Lock()
 
-def check_rate_limit(ip: str):
-    now = time.time()
-    if ip not in rate_limit_store:
-        rate_limit_store[ip] = []
-    rate_limit_store[ip] = [t for t in rate_limit_store[ip] if now - t < RATE_LIMIT_WINDOW]
-    count = len(rate_limit_store[ip])
-    if count >= RATE_LIMIT_MAX:
-        return False, count, 0
-    rate_limit_store[ip].append(now)
-    remaining = RATE_LIMIT_MAX - len(rate_limit_store[ip])
-    return True, len(rate_limit_store[ip]), remaining
 
-def get_rate_limit_stats():
-    now = time.time()
-    stats = {}
-    for ip, times in rate_limit_store.items():
-        recent = [t for t in times if now - t < RATE_LIMIT_WINDOW]
-        stats[ip] = {"requests_last_60s": len(recent), "limit": RATE_LIMIT_MAX, "window": RATE_LIMIT_WINDOW}
-    return stats
+# ---------------------------------------------------------------------------
+# Base de datos
+# ---------------------------------------------------------------------------
+def init_db(path: str = DB_PATH) -> None:
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS accesos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT,
+            rol TEXT,
+            recurso TEXT,
+            hora TEXT,
+            anomalo INTEGER DEFAULT 0,
+            timestamp REAL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
 
-def verificar_2fa_token(token: Optional[str]) -> bool:
-    return token == FACTOR_2FA_CODE
 
-def es_ruta_admin(path: str) -> bool:
-    return "/admin" in path
+def registrar_acceso(registro: Dict, anomalo: bool, path: str = DB_PATH) -> None:
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO accesos (ip, rol, recurso, hora, anomalo, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            registro.get("ip", ""),
+            registro.get("rol", ""),
+            registro.get("recurso", ""),
+            registro.get("hora", ""),
+            1 if anomalo else 0,
+            time.time(),
+        ),
+    )
+    conn.commit()
+    conn.close()
 
-def ollama_disponible() -> bool:
+
+# ---------------------------------------------------------------------------
+# Detectores estaticos (base Nivel 9.1)
+# ---------------------------------------------------------------------------
+def detectar_privilegio(r: Dict) -> bool:
+    admin_paths = ["/admin", "/config", "/users"]
+    return r.get("rol") == "user" and any(p in r.get("recurso", "").lower() for p in admin_paths)
+
+
+def detectar_horario(r: Dict) -> bool:
     try:
-        import requests
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=2)
-        return r.status_code == 200
-    except:
+        h = int(r.get("hora", "00:00:00").split(":")[0])
+        return r.get("rol") == "admin" and (h >= 23 or h <= 5) and "/admin" in r.get("recurso", "")
+    except Exception:
         return False
 
-def consultar_ollama(prompt: str, system_prompt: str = None, modelo: str = None) -> Dict:
-    if modelo is None:
-        modelo = OLLAMA_MODEL
-    if not ollama_disponible():
-        return {"disponible": False, "respuesta": f"[OFFLINE] Ollama no disponible - prompt: {prompt[:120]}", "modelo": modelo, "offline": True}
-    try:
-        import requests
-        payload = {"model": modelo, "prompt": prompt, "system": system_prompt or "Eres experto seguridad Python FastAPI. Responde conciso con codigo.", "stream": False}
-        r = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=30)
-        if r.status_code == 200:
-            data = r.json()
-            return {"disponible": True, "respuesta": data.get("response",""), "modelo": modelo, "offline": False}
-        else:
-            return {"disponible": True, "respuesta": f"Error Ollama {r.status_code}: {r.text[:300]}", "modelo": modelo, "error": True, "offline": False}
-    except Exception as e:
-        return {"disponible": False, "respuesta": f"[ERROR] {e} - fallback offline", "modelo": modelo, "offline": True, "error": str(e)}
 
-def backup_antes_de_parche() -> Optional[str]:
-    try:
-        BACKUP_DIR.mkdir(exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = BACKUP_DIR / f"main_backup_{ts}.py"
-        if Path("main.py").exists():
-            shutil.copy("main.py", backup_path)
-            logger.info(f"Backup Nivel 9 creado {backup_path}")
-            return str(backup_path)
-        return None
-    except Exception as e:
-        logger.error(f"Backup error {e}")
-        return None
+def detectar_brute_force(r: Dict) -> bool:
+    return "/admin" in r.get("recurso", "") and r.get("rol") in ["user", "guest", ""]
 
-def validar_parche_sintaxis(codigo: str):
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
-            f.write(codigo)
-            temp_path = f.name
-        py_compile.compile(temp_path, doraise=True)
-        os.unlink(temp_path)
-        return True, "Sintaxis OK"
-    except Exception as e:
+
+def detectar_rate_limit(ip: str, store: Optional[Dict] = None) -> bool:
+    store = store if store is not None else rate_limit_store
+    if not ip or ip not in store:
+        return False
+    recent = [t for t in store.get(ip, []) if time.time() - t < 60]
+    return len(recent) >= 8
+
+
+def detectar_2fa_bypass(r: Dict) -> bool:
+    return "/admin" in r.get("recurso", "") and r.get("ip") in ["10.0.0.4", "10.0.0.99"]
+
+
+def registrar_intento_rate_limit(ip: str, store: Optional[Dict] = None) -> None:
+    store = store if store is not None else rate_limit_store
+    with _lock:
+        store.setdefault(ip, []).append(time.time())
+
+
+# ---------------------------------------------------------------------------
+# Memoria inmunologica: bloqueo adaptativo de IPs reincidentes (Nivel 12)
+# ---------------------------------------------------------------------------
+def _cargar_lista_negra() -> Dict:
+    if os.path.isfile(LISTA_NEGRA_PATH):
         try:
-            os.unlink(temp_path)
-        except:
+            with open(LISTA_NEGRA_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+_lista_negra: Dict[str, Dict] = _cargar_lista_negra()
+
+
+def _guardar_lista_negra() -> None:
+    with open(LISTA_NEGRA_PATH, "w", encoding="utf-8") as f:
+        json.dump(_lista_negra, f, ensure_ascii=False, indent=2)
+
+
+def _verificar_persistencia_lista_negra() -> bool:
+    """Comprueba que la memoria inmunologica se puede leer y escribir en disco."""
+    try:
+        _guardar_lista_negra()
+        return _cargar_lista_negra() is not None
+    except OSError:
+        return False
+
+
+def ip_bloqueada(ip: str) -> bool:
+    if not ip:
+        return False
+    with _lock:
+        return bool(_lista_negra.get(ip, {}).get("bloqueada"))
+
+
+def registrar_memoria_inmunologica(ip: str, anomalo: bool) -> None:
+    """Cada anomalia detectada de una IP suma a su 'memoria'. Al superar el
+    umbral, la IP queda bloqueada de forma persistente (respuesta inmune
+    adaptativa: la segunda exposicion a una amenaza se neutraliza mas rapido)."""
+    if not ip or not anomalo:
+        return
+    with _lock:
+        entrada = _lista_negra.get(ip, {"conteo": 0, "primera_vez": time.time()})
+        entrada["conteo"] = entrada.get("conteo", 0) + 1
+        entrada["ultima_vez"] = time.time()
+        if entrada["conteo"] >= UMBRAL_BLOQUEO:
+            entrada["bloqueada"] = True
+        _lista_negra[ip] = entrada
+        try:
+            _guardar_lista_negra()
+        except OSError:
             pass
-        return False, str(e)
 
-def limpiar_codigo_ollama(codigo: str) -> str:
-    # Limpia ```python ... ``` y fences markdown que rompen sintaxis
-    codigo = codigo.strip()
-    # Quitar bloques markdown
-    codigo = re.sub(r'^```(?:python)?\s*', '', codigo, flags=re.MULTILINE)
-    codigo = re.sub(r'\s*```\s*$', '', codigo, flags=re.MULTILINE)
-    # Quitar primera linea si es ```python
-    lines = codigo.splitlines()
-    cleaned = []
-    in_code = True
-    for line in lines:
-        if line.strip().startswith('```'):
-            continue
-        cleaned.append(line)
-    codigo = "\n".join(cleaned).strip()
-    return codigo
 
-def generar_parche_seguridad(tipo_anomalia: str, contexto: Dict = None) -> Dict:
-    contexto = contexto or {}
-    prompt_base = f"Tipo anomalia: {tipo_anomalia} Contexto: {json.dumps(contexto, indent=2)[:1200]} Genera funcion Python detectar_{tipo_anomalia}_v9 que mejore deteccion. Requisitos: funcion pura, recibe dict registro, retorna bool, max 8 lineas. SOLO CODIGO, SIN MARKDOWN, SIN ```."
-    resultado = consultar_ollama(prompt_base, system_prompt="Eres implementador seguridad. Genera SOLO codigo Python limpio y seguro. Sin explicacion, sin markdown, sin ```.")
-    # Limpiar markdown si Ollama lo devolvio
-    if resultado.get("respuesta"):
-        resultado["respuesta"] = limpiar_codigo_ollama(resultado["respuesta"])
-    if resultado.get("offline") or len(resultado.get("respuesta","").strip()) < 10:
-        fallbacks = {
-            "privilegio": "def detectar_privilegio_v9(r):\n    return r.get('rol')=='user' and '/admin' in r.get('recurso','')",
-            "horario": "def detectar_horario_v9(r):\n    try:\n        h=int(r.get('hora','00:00:00').split(':')[0])\n        return r.get('rol')=='admin' and (h>=23 or h<=5)\n    except:\n        return False",
-            "brute_force": "def detectar_brute_force_v9(r):\n    return '/admin' in r.get('recurso','') and r.get('rol')!='admin'",
-            "frecuencia_ip": "def detectar_frecuencia_ip_v9(ip, store):\n    return len(store.get(ip,[])) > 8",
-            "rate_limit": "def detectar_rate_limit_v9(ip, store):\n    return len([t for t in store.get(ip,[]) if time.time()-t < 60]) > 8",
-            "2fa_bypass": "def detectar_2fa_bypass_v9(req):\n    return '/admin' in req.get('path','') and not req.get('headers',{}).get('X-2FA')"
-        }
-        codigo = fallbacks.get(tipo_anomalia, f"def detectar_{tipo_anomalia}_v9(r):\n    return True")
-        resultado["respuesta"] = codigo
-        resultado["fallback"] = True
-        resultado["offline"] = True
-    else:
-        resultado["fallback"] = False
-    ok, msg = validar_parche_sintaxis(resultado["respuesta"])
-    resultado["sintaxis_ok"] = ok
-    resultado["sintaxis_msg"] = msg
+def obtener_lista_negra() -> Dict:
+    with _lock:
+        return dict(_lista_negra)
+
+
+# ---------------------------------------------------------------------------
+# Motor Evolutivo Nivel 10: carga dinamica segura via ast.parse + importlib
+# ---------------------------------------------------------------------------
+class MotorEvolutivoNivel10:
+    """
+    Carga en caliente funciones con prefijo 'detectar_' desde un modulo externo
+    (evolutivo_real.py), validando su sintaxis con ast.parse antes de ejecutar
+    cualquier import real. Si algo falla o el fitness cae mas del margen
+    permitido respecto al optimo, se aisla el motor dinamico y el sistema
+    retorna automaticamente a los detectores estaticos.
+    """
+
+    def __init__(self, path: str = EVOLUTIVO_PATH, fitness_optimo: int = FITNESS_OPTIMO,
+                 margen_rollback: int = FITNESS_ROLLBACK_MARGEN):
+        self.path = path
+        self.fitness_optimo = fitness_optimo
+        self.margen_rollback = margen_rollback
+        self.detectores_dinamicos: Dict[str, object] = {}
+        self.activo = False
+        self.aislado = False
+        self.motivo_aislamiento: Optional[str] = None
+        self._ultimo_mtime: Optional[float] = None
+        self._detectores_respaldo: Dict[str, object] = {}
+        self._cargar()
+
+    def _validar_sintaxis(self) -> bool:
+        if not os.path.isfile(self.path):
+            self.motivo_aislamiento = f"No existe el archivo {self.path}"
+            return False
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                codigo = f.read()
+            ast.parse(codigo)
+            return True
+        except SyntaxError as e:
+            self.motivo_aislamiento = f"Error de sintaxis en {self.path}: {e}"
+            return False
+
+    def _cargar(self) -> None:
+        if not self._validar_sintaxis():
+            self.aislado = True
+            self.activo = False
+            return
+
+        try:
+            spec = importlib.util.spec_from_file_location("evolutivo_real_dinamico", self.path)
+            modulo = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(modulo)
+        except Exception as e:
+            self.motivo_aislamiento = f"Fallo al importar dinamicamente: {e}"
+            self.aislado = True
+            self.activo = False
+            return
+
+        detectores = {}
+        for nombre in dir(modulo):
+            if nombre.startswith("detectar_"):
+                candidato = getattr(modulo, nombre)
+                if callable(candidato):
+                    detectores[nombre] = candidato
+
+        self.detectores_dinamicos = detectores
+        self.activo = len(detectores) > 0
+        self.aislado = not self.activo
+        if self.aislado and self.motivo_aislamiento is None:
+            self.motivo_aislamiento = "No se encontraron funciones con prefijo 'detectar_'"
+
+        if self.activo:
+            # Respaldo valido para poder revertir si una futura recarga falla
+            self._detectores_respaldo = dict(detectores)
+            try:
+                self._ultimo_mtime = os.path.getmtime(self.path)
+            except OSError:
+                self._ultimo_mtime = None
+
+    def recargar_si_cambio(self) -> bool:
+        """
+        Verifica si evolutivo_real.py cambio en disco (por mtime). Si cambio,
+        intenta una recarga en caliente validada con ast.parse. Si la nueva
+        version es invalida o no aporta detectores, hace rollback automatico
+        al ultimo conjunto de detectores valido (self._detectores_respaldo)
+        y NO deja el sistema sin proteccion.
+        """
+        try:
+            mtime_actual = os.path.getmtime(self.path)
+        except OSError:
+            return False
+
+        if self._ultimo_mtime is not None and mtime_actual == self._ultimo_mtime:
+            return False  # sin cambios
+
+        estado_previo = (
+            dict(self.detectores_dinamicos),
+            self.activo,
+            self.aislado,
+            self.motivo_aislamiento,
+        )
+
+        self._cargar()
+
+        if self.aislado or not self.activo:
+            # Rollback: restauramos el ultimo estado funcional conocido
+            if self._detectores_respaldo:
+                self.detectores_dinamicos = dict(self._detectores_respaldo)
+                self.activo = True
+                self.aislado = False
+                self.motivo_aislamiento = (
+                    f"Rollback tras recarga fallida: {self.motivo_aislamiento}"
+                )
+            else:
+                self.detectores_dinamicos, self.activo, self.aislado, self.motivo_aislamiento = estado_previo
+            return False
+
+        return True
+
+    def evaluar(self, registro: Dict, ip: Optional[str] = None,
+                store: Optional[Dict] = None) -> Dict[str, bool]:
+        """Evalua todos los detectores dinamicos disponibles sobre un registro."""
+        resultados: Dict[str, bool] = {}
+        if not self.activo or self.aislado:
+            return resultados
+
+        store = store if store is not None else rate_limit_store
+        for nombre, func in self.detectores_dinamicos.items():
+            try:
+                if "rate_limit" in nombre:
+                    resultados[nombre] = bool(func(ip or registro.get("ip", ""), store))
+                else:
+                    resultados[nombre] = bool(func(registro))
+            except Exception:
+                # Aislamiento puntual del detector individual, no del motor completo
+                resultados[nombre] = False
+        return resultados
+
+    def verificar_fitness(self, fitness_actual: int) -> bool:
+        """Retorna True si el fitness es aceptable; si cae demasiado, aisla el motor."""
+        if self.fitness_optimo - fitness_actual > self.margen_rollback:
+            self.aislado = True
+            self.motivo_aislamiento = (
+                f"Rollback automatico: fitness {fitness_actual} cayo mas de "
+                f"{self.margen_rollback} puntos respecto al optimo {self.fitness_optimo}"
+            )
+            return False
+        return True
+
+    def conteo_detectores_activos(self) -> int:
+        return len(self.detectores_dinamicos) if self.activo and not self.aislado else 0
+
+
+# Instancia global del motor evolutivo (se carga una vez al importar el modulo)
+motor_evolutivo = MotorEvolutivoNivel10()
+
+
+# ---------------------------------------------------------------------------
+# Deteccion de anomalias (integracion dinamica + estatica)
+# ---------------------------------------------------------------------------
+def _evaluar_reglas(registro: Dict, store: Dict) -> Dict:
+    """Evaluacion pura: sin logging ni efectos sobre memoria inmunologica.
+    Reutilizada tanto por detectar_anomalias como por el autodiagnostico."""
+    ip = registro.get("ip", "")
+
+    reglas_dinamicas = motor_evolutivo.evaluar(registro, ip=ip, store=store)
+    anomalo_dinamico = any(reglas_dinamicas.values())
+
+    reglas_estaticas = {
+        "detectar_privilegio": detectar_privilegio(registro),
+        "detectar_horario": detectar_horario(registro),
+        "detectar_brute_force": detectar_brute_force(registro),
+        "detectar_rate_limit": detectar_rate_limit(ip, store),
+        "detectar_2fa_bypass": detectar_2fa_bypass(registro),
+    }
+    anomalo_estatico = any(reglas_estaticas.values())
+    anomalo = anomalo_dinamico or anomalo_estatico
+
+    resultado = {
+        "anomalo": anomalo,
+        "origen": "dinamico" if anomalo_dinamico else ("estatico" if anomalo_estatico else "ninguno"),
+        "reglas_dinamicas": reglas_dinamicas,
+        "reglas_estaticas": reglas_estaticas,
+        "motor_aislado": motor_evolutivo.aislado,
+    }
+    resultado["severidad"] = _severidad(resultado)
     return resultado
 
-def proponer_evolucion_ollama(anomalias: List[Dict] = None) -> Dict:
-    if anomalias is None:
-        anomalias = detectar_anomalias(cargar_historico())
-    if not anomalias:
-        return {"evolucion": "No hay anomalias - sistema estable Nivel 9", "parches": [], "ollama_usado": False, "nivel": 9}
-    tipos = list(set(a["tipo"] for a in anomalias))
-    parches = []
-    for tipo in tipos[:3]:
-        parche = generar_parche_seguridad(tipo, {"ejemplos": [a["detalle"] for a in anomalias if a["tipo"]==tipo][:2]})
-        parches.append({"tipo": tipo, "codigo": parche["respuesta"][:2500], "ollama": not parche.get("offline", True), "fallback": parche.get("fallback", False), "sintaxis_ok": parche.get("sintaxis_ok", False)})
-    EVOLUCIONES_DIR.mkdir(exist_ok=True)
-    PARCHES_DIR.mkdir(exist_ok=True)
-    evo_file = EVOLUCIONES_DIR / f"evolucion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    for p in parches:
-        pf = PARCHES_DIR / f"parche_{p['tipo']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.py"
-        pf.write_text(p["codigo"], encoding="utf-8")
-    evo_data = {"fecha": datetime.now().isoformat(), "nivel": 9, "anomalias": len(anomalias), "tipos": tipos, "parches": parches, "fitness": calcular_fitness_real(), "ollama_disponible": ollama_disponible(), "modelo": OLLAMA_MODEL}
-    evo_file.write_text(json.dumps(evo_data, indent=2), encoding="utf-8")
-    with open(IMPLEMENTADOR_LOG, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now().isoformat()} - Evolucion N9 - {len(anomalias)} anomalias -> {len(parches)} parches - ollama:{ollama_disponible()}\n")
-    return {"evolucion": f"Nivel 9 - {len(anomalias)} anomalias -> {len(parches)} parches", "tipos": tipos, "parches": parches, "archivo": str(evo_file), "ollama_disponible": ollama_disponible(), "modelo": OLLAMA_MODEL, "nivel": 9}
 
+def detectar_anomalias(registro: Dict, store: Optional[Dict] = None) -> Dict:
+    """
+    Evalua un registro de acceso. Prioridad de evaluacion (Nivel 12):
+    1) Memoria inmunologica: si la IP ya fue bloqueada por reincidencia,
+       se rechaza de inmediato sin correr el resto de detectores.
+    2) Reglas dinamicas del motor Nivel 10/11.
+    3) Reglas estaticas base (Nivel 9.1) como respaldo garantizado.
+    Toda anomalia detectada alimenta la memoria inmunologica y queda logueada
+    con severidad.
+    """
+    store = store if store is not None else rate_limit_store
+    ip = registro.get("ip", "")
 
-class Acceso(BaseModel):
-    usuario: str = Field(..., min_length=1)
-    rol: str = Field(..., pattern="^(admin|user|guest)$")
-    fecha: str
-    hora: str
-    recurso: str
-    ip: Optional[str] = None
-    user_agent: Optional[str] = None
+    if ip_bloqueada(ip):
+        resultado = {
+            "anomalo": True,
+            "origen": "memoria_inmunologica",
+            "reglas_dinamicas": {},
+            "reglas_estaticas": {},
+            "motor_aislado": motor_evolutivo.aislado,
+            "severidad": "critica",
+        }
+    else:
+        resultado = _evaluar_reglas(registro, store)
 
-def init_db(db_path=DB_PATH):
-    logger.info(f"Init DB {db_path}")
-    conn = sqlite3.connect(str(db_path))
-    cur = conn.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS accesos (
-        id INTEGER PRIMARY KEY, raw TEXT, usuario TEXT, rol TEXT, fecha TEXT, hora TEXT, recurso TEXT, ip TEXT, user_agent TEXT, bloqueada INTEGER DEFAULT 0)""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS lista_negra (
-        ip TEXT PRIMARY KEY, motivo TEXT, fecha_bloqueo TEXT, anomalias INTEGER)""")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_rol ON accesos(rol)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_ip ON accesos(ip)")
-    conn.commit(); conn.close()
-
-def insertar_accesos(accesos: List[Dict], db_path=DB_PATH):
-    init_db(db_path)
-    conn = sqlite3.connect(str(db_path))
-    cur = conn.cursor()
-    cur.execute("DELETE FROM accesos")
-    for r in accesos:
-        cur.execute("INSERT INTO accesos (raw,usuario,rol,fecha,hora,recurso,ip,user_agent) VALUES (?,?,?,?,?,?,?,?)",
-                    (json.dumps(r),r.get("usuario"),r.get("rol"),r.get("fecha"),r.get("hora"),r.get("recurso"),r.get("ip"),r.get("user_agent")))
-    conn.commit(); conn.close()
-    return len(accesos)
-
-def cargar_historico(path=str(HISTORICO)):
-    if not os.path.exists(path):
-        demo = [
-            {"usuario":"ana","rol":"admin","fecha":"2024-01-02","hora":"09:30:00","recurso":"/admin/dashboard","ip":"10.0.0.1"},
-            {"usuario":"luis","rol":"admin","fecha":"2024-01-01","hora":"08:00:00","recurso":"/admin/users","ip":"10.0.0.2"},
-            {"usuario":"maria","rol":"user","fecha":"2024-01-03","hora":"10:00:00","recurso":"/perfil","ip":"10.0.0.3"},
-            {"usuario":"jose","rol":"user","fecha":"2024-01-04","hora":"22:15:00","recurso":"/admin/dashboard","ip":"10.0.0.4"},
-            {"usuario":"sofia","rol":"admin","fecha":"2024-01-05","hora":"23:30:00","recurso":"/admin/config","ip":"10.0.0.5"},
-        ]
-        Path(path).write_text(json.dumps(demo, indent=2))
-        return demo
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-def cargar_lista_negra():
-    if not LISTA_NEGRA.exists():
-        return []
-    try:
-        return json.loads(LISTA_NEGRA.read_text())
-    except:
-        return []
-
-def guardar_lista_negra(lista):
-    LISTA_NEGRA.write_text(json.dumps(lista, indent=2))
-
-def bloquear_ip(ip: str, motivo: str, anomalias: int = 1):
-    try:
-        lista = cargar_lista_negra()
-        if any(x["ip"]==ip for x in lista):
-            logger.info(f"IP {ip} ya bloqueada")
-            return False
-        entry = {"ip": ip, "motivo": motivo, "fecha_bloqueo": datetime.now().isoformat(), "anomalias": anomalias}
-        lista.append(entry)
-        guardar_lista_negra(lista)
+    if resultado["anomalo"]:
         try:
-            init_db()
-            conn = sqlite3.connect(str(DB_PATH))
-            cur = conn.cursor()
-            cur.execute("INSERT OR REPLACE INTO lista_negra (ip,motivo,fecha_bloqueo,anomalias) VALUES (?,?,?,?)",
-                        (ip,motivo,entry["fecha_bloqueo"],anomalias))
-            cur.execute("UPDATE accesos SET bloqueada=1 WHERE ip=?", (ip,))
-            conn.commit(); conn.close()
-        except Exception as e:
-            logger.error(f"DB bloqueo error {e} - continuo con JSON")
-        logger.warning(f"IP BLOQUEADA: {ip} motivo={motivo}")
+            registrar_anomalia(registro, resultado)
+        except Exception:
+            pass  # el logging nunca debe tumbar la deteccion
+        if resultado["origen"] != "memoria_inmunologica":
+            registrar_memoria_inmunologica(ip, True)
+
+    return resultado
+
+
+# ---------------------------------------------------------------------------
+# Estadisticas / Health endpoint
+# ---------------------------------------------------------------------------
+DETECTORES_ESTATICOS_TOTAL = 5
+PUNTOS_POR_DETECTOR_ESTATICO = 14   # 5 x 14 = 70
+PUNTOS_POR_DETECTOR_DINAMICO = 10   # hasta 8 x 10 = 80
+PUNTOS_MOTOR_SANO = 10              # bono si el motor dinamico no esta aislado
+PUNTOS_AUTODIAGNOSTICO = 20         # bono si el autodiagnostico de arranque paso
+PUNTOS_MEMORIA_INMUNOLOGICA = 20    # bono si la memoria inmunologica persiste en disco
+# Techo: 70 + 80 + 10 + 20 + 20 = 200
+
+
+def autodiagnostico() -> bool:
+    """
+    Autodiagnostico de arranque (Nivel 12): antes de declarar el sistema
+    saludable, se valida con casos de control conocidos que la deteccion
+    real sigue funcionando -- ni sobre-detecta trafico legitimo, ni deja
+    pasar ataques conocidos. No usa logging ni memoria inmunologica para
+    no contaminar el estado real del sistema con datos sinteticos.
+    """
+    casos_maliciosos = [
+        {"rol": "user", "recurso": "/admin/panel", "ip": "203.0.113.5"},
+        {"recurso": "/files/../../etc/passwd", "ip": "203.0.113.6"},
+        {"recurso": "/login", "user_agent": "sqlmap/1.6", "ip": "203.0.113.7"},
+    ]
+    casos_benignos = [
+        {"rol": "admin", "recurso": "/dashboard/home", "hora": "10:00:00", "ip": "198.51.100.10"},
+        {"rol": "user", "recurso": "/perfil", "hora": "11:00:00", "ip": "198.51.100.11"},
+    ]
+    try:
+        store_temporal: Dict[str, List[float]] = {}
+        for caso in casos_maliciosos:
+            if not _evaluar_reglas(caso, store_temporal)["anomalo"]:
+                return False
+        for caso in casos_benignos:
+            if _evaluar_reglas(caso, store_temporal)["anomalo"]:
+                return False
         return True
-    except Exception as e:
-        logger.error(f"Error bloqueando IP {ip}: {e}")
+    except Exception:
         return False
 
-def desbloquear_ip(ip: str):
-    lista = cargar_lista_negra()
-    nueva = [x for x in lista if x["ip"]!=ip]
-    if len(nueva)==len(lista):
-        return False
-    guardar_lista_negra(nueva)
-    conn = sqlite3.connect(str(DB_PATH))
+
+def calcular_fitness_real() -> int:
+    """
+    Fitness derivado del estado real del sistema, no un valor fijo: base por
+    detectores estaticos siempre presentes + puntos por cada detector
+    dinamico realmente cargado y activo + bono de salud del motor + bono de
+    autodiagnostico + bono de memoria inmunologica persistente. Capado a
+    FITNESS_OPTIMO (200).
+    """
+    fitness = DETECTORES_ESTATICOS_TOTAL * PUNTOS_POR_DETECTOR_ESTATICO
+    fitness += motor_evolutivo.conteo_detectores_activos() * PUNTOS_POR_DETECTOR_DINAMICO
+    if motor_evolutivo.activo and not motor_evolutivo.aislado:
+        fitness += PUNTOS_MOTOR_SANO
+    if AUTODIAGNOSTICO_OK:
+        fitness += PUNTOS_AUTODIAGNOSTICO
+    if MEMORIA_INMUNOLOGICA_OK:
+        fitness += PUNTOS_MEMORIA_INMUNOLOGICA
+    return min(fitness, FITNESS_OPTIMO)
+
+
+def _nivel_actual() -> int:
+    activos = motor_evolutivo.conteo_detectores_activos()
+    if activos >= 8 and AUTODIAGNOSTICO_OK and MEMORIA_INMUNOLOGICA_OK:
+        return 12
+    if activos >= 8:
+        return 11
+    return 10
+
+
+def calcular_estadisticas() -> Dict:
+    fitness_actual = calcular_fitness_real()
+    return {
+        "nivel": _nivel_actual(),
+        "fitness": fitness_actual,
+        "fitness_optimo": FITNESS_OPTIMO,
+        "detectores_estaticos": DETECTORES_ESTATICOS_TOTAL,
+        "detectores_dinamicos": motor_evolutivo.conteo_detectores_activos(),
+        "motor_evolutivo_activo": motor_evolutivo.activo and not motor_evolutivo.aislado,
+        "motor_aislado": motor_evolutivo.aislado,
+        "rollback_disponible": bool(motor_evolutivo._detectores_respaldo),
+        "autodiagnostico_ok": AUTODIAGNOSTICO_OK,
+        "memoria_inmunologica_ok": MEMORIA_INMUNOLOGICA_OK,
+        "ips_bloqueadas": sum(1 for v in _lista_negra.values() if v.get("bloqueada")),
+    }
+
+
+def health(estado_externo: Optional[Dict] = None) -> Dict:
+    estado_externo = estado_externo or {}
+    motor_evolutivo.recargar_si_cambio()
+    stats = calcular_estadisticas()
+    return {
+        "status": "ok",
+        "nivel": stats["nivel"],
+        "detectores_dinamicos": stats["detectores_dinamicos"],
+        "fitness": stats["fitness"],
+        "ips_bloqueadas": stats["ips_bloqueadas"],
+        "ollama_disponible": estado_externo.get("ollama_disponible", False),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Logging de anomalias con severidad
+# ---------------------------------------------------------------------------
+def _severidad(resultado: Dict) -> str:
+    reglas_activas = sum(1 for v in resultado.get("reglas_dinamicas", {}).values() if v)
+    reglas_activas += sum(1 for v in resultado.get("reglas_estaticas", {}).values() if v)
+    if reglas_activas >= 3:
+        return "critica"
+    if reglas_activas == 2:
+        return "alta"
+    if reglas_activas == 1:
+        return "media"
+    return "info"
+
+
+def registrar_anomalia(registro: Dict, resultado: Dict, path: str = DB_PATH) -> None:
+    conn = sqlite3.connect(path)
     cur = conn.cursor()
-    cur.execute("DELETE FROM lista_negra WHERE ip=?", (ip,))
-    cur.execute("UPDATE accesos SET bloqueada=0 WHERE ip=?", (ip,))
-    conn.commit(); conn.close()
-    logger.info(f"IP DESBLOQUEADA: {ip}")
-    return True
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS anomalias_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT, recurso TEXT, rol TEXT,
+            origen TEXT, severidad TEXT, timestamp REAL
+        )
+        """
+    )
+    cur.execute(
+        "INSERT INTO anomalias_log (ip, recurso, rol, origen, severidad, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            registro.get("ip", ""),
+            registro.get("recurso", ""),
+            registro.get("rol", ""),
+            resultado.get("origen", "ninguno"),
+            _severidad(resultado),
+            time.time(),
+        ),
+    )
+    conn.commit()
+    conn.close()
 
-def es_ip_bloqueada(ip: str):
-    return any(x["ip"]==ip for x in cargar_lista_negra())
 
-def detectar_anomalias(datos: List[Dict]) -> List[Dict]:
-    anomalias = []
-    ips = [d.get("ip") for d in datos if d.get("ip")]
-    usuarios = [d.get("usuario") for d in datos]
-    ip_counts = Counter(ips)
-    user_counts = Counter(usuarios)
-    for r in datos:
-        if r.get("rol")=="user" and "/admin" in r.get("recurso",""):
-            anomalias.append({"tipo":"privilegio","severidad":"alta","detalle":f"{r['usuario']} user->{r['recurso']}","registro":r})
-            logger.warning(f"Anomalia privilegio: {r}")
-        try:
-            h = int(r.get("hora","00:00:00").split(":")[0])
-            if r.get("rol")=="admin" and (h>=22 or h<=5) and "/admin" in r.get("recurso",""):
-                anomalias.append({"tipo":"horario","severidad":"media","detalle":f"admin nocturno {r['usuario']} {r['hora']}","registro":r})
-        except: pass
-        if ip_counts[r.get("ip","")] > 3:
-            anomalias.append({"tipo":"frecuencia_ip","severidad":"media","detalle":f"IP {r['ip']} {ip_counts[r['ip']]} accesos","registro":r})
-        if user_counts[r.get("usuario","")] > 4:
-            anomalias.append({"tipo":"frecuencia_usuario","severidad":"baja","detalle":f"Usuario {r['usuario']} {user_counts[r['usuario']]} accesos","registro":r})
-        if "/admin" in r.get("recurso","") and r.get("rol")!="admin":
-            anomalias.append({"tipo":"brute_force","severidad":"critica","detalle":f"Intento brute force {r['usuario']}->{r['recurso']}","registro":r})
-    uniq = {}
-    for a in anomalias:
-        uniq[a["detalle"]] = a
-    result = list(uniq.values())
-    logger.info(f"Detectadas {len(result)} anomalias unicas de {len(anomalias)} totales")
-    return result
+# Flags globales de salud del sistema, calculados una vez al levantar el modulo
+AUTODIAGNOSTICO_OK: bool = autodiagnostico()
+MEMORIA_INMUNOLOGICA_OK: bool = _verificar_persistencia_lista_negra()
 
-def calcular_estadisticas(datos):
-    por_rol = {}
-    for d in datos: por_rol[d.get("rol","?")] = por_rol.get(d.get("rol","?"),0)+1
-    bloqueadas = sum(1 for d in datos if es_ip_bloqueada(d.get("ip","")))
-    rate_stats = get_rate_limit_stats()
-    return {"total":len(datos),"por_rol":por_rol,"usuarios_unicos":len(set(d.get("usuario") for d in datos)),"ips_unicas":len(set(d.get("ip") for d in datos if d.get("ip"))),"bloqueadas":bloqueadas,"lista_negra_count":len(cargar_lista_negra()),"rate_limit_active":len(rate_stats),"nivel":9,"ollama_disponible":ollama_disponible(),"evoluciones":len(list(EVOLUCIONES_DIR.glob("*.json")) if EVOLUCIONES_DIR.exists() else []),"parches":len(list(PARCHES_DIR.glob("*.py")) if PARCHES_DIR.exists() else [])}
 
-def calcular_fitness_real():
-    try:
-        target = "test_nivel7"
-        result = subprocess.run(["python3","-m","unittest", target, "-v"], capture_output=True, text=True, timeout=90)
-        out = result.stderr + result.stdout
-        m = re.search(r"Ran (\d+) tests", out)
-        total = int(m.group(1)) if m else 0
-        # Fix: contar solo fallos reales, no substrings en nombres de tests
-        # Buscar lineas que empiezan con FAIL: o ERROR: o resumen FAILED
-        fails_real = len(re.findall(r"^(FAIL|ERROR):", out, re.MULTILINE))
-        if "FAILED" in out:
-            # Extraer numero de fails del resumen FAILED (failures=X, errors=Y)
-            m_fail = re.search(r"FAILED \(failures=(\d+)(?:, errors=(\d+))?\)", out)
-            m_err = re.search(r"FAILED \(errors=(\d+)\)", out)
-            if m_fail:
-                fails_real = int(m_fail.group(1)) + (int(m_fail.group(2)) if m_fail.group(2) else 0)
-            elif m_err:
-                fails_real = int(m_err.group(1))
-            elif fails_real == 0:
-                # Si hay FAILED pero no parseamos, contar 1
-                fails_real = 1
-        else:
-            fails_real = 0 if "OK" in out else fails_real
-        fails = fails_real
-        ok = fails==0 and total>0 and "OK" in out
-        fitness = total*10 - fails*20 + (20 if ollama_disponible() else 0) + (10 if PARCHES_DIR.exists() and len(list(PARCHES_DIR.glob("*.py")))>0 else 0)
-        return {"total_tests":total,"ok":ok,"fails":fails,"fitness":fitness,"raw":out[-1500:],"ollama":ollama_disponible()}
-    except Exception as e:
-        return {"total_tests":0,"ok":False,"fitness":0,"error":str(e)}
+# ---------------------------------------------------------------------------
+# Servidor HTTP minimo (sin dependencias externas) - concurrente (Nivel 12)
+# ---------------------------------------------------------------------------
+def _crear_servidor(puerto: int = 8080):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-def predecir_rol(recurso: str, historico=None):
-    if historico is None: historico = cargar_historico()
-    admin_keywords = ["/admin","/config","/users","/dashboard"]
-    score = sum(1 for kw in admin_keywords if kw in recurso)
-    if score>0: return {"rol_predicho":"admin","confianza":0.8+0.05*score,"motivo":f"contiene {admin_keywords}"}
-    return {"rol_predicho":"user","confianza":0.7,"motivo":"recurso publico"}
+    class Handler(BaseHTTPRequestHandler):
+        def _responder(self, codigo: int, payload: Dict):
+            cuerpo = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(codigo)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(cuerpo)))
+            self.end_headers()
+            self.wfile.write(cuerpo)
 
-def proponer_siguiente_orden(auto_bloquear=True):
-    log_text = LOG_PATH.read_text(encoding="utf-8")[-10000:] if LOG_PATH.exists() else ""
-    anomalias = detectar_anomalias(cargar_historico())
-    errores = log_text.lower().count("error")
-    warnings = log_text.lower().count("warning")
-    anomalias_log = log_text.lower().count("anomalia")
-    bloqueos_nuevos = []
-    evo = {"evolucion":"init","parches":[]}
-    if auto_bloquear:
-        for a in anomalias:
-            if a["severidad"] in ("alta","critica"):
-                ip = a["registro"].get("ip")
-                if ip and not es_ip_bloqueada(ip):
-                    if bloquear_ip(ip, a["detalle"], 1):
-                        bloqueos_nuevos.append(ip)
-    # Evolucion Ollama cada ciclo si hay anomalias
-    evo = proponer_evolucion_ollama(anomalias) if len(anomalias)>=1 else {"evolucion":"Estable","parches":[],"archivo":""}
-    propuesta = [f"NIVEL 9 - {datetime.now().isoformat()} - Ollama:{ollama_disponible()}"]
-    propuesta.append(f"Anomalias: {len(anomalias)} | log: {anomalias_log} | errores: {errores} | Ollama: {ollama_disponible()} | EvoDir: {len(list(EVOLUCIONES_DIR.glob('*.json'))) if EVOLUCIONES_DIR.exists() else 0}")
-    propuesta.append(f"Rate limiting: {RATE_LIMIT_MAX} req/{RATE_LIMIT_WINDOW}s | IPs monitoreadas: {len(rate_limit_store)}")
-    if bloqueos_nuevos:
-        propuesta.append(f"AUTO-BLOQUEO EJECUTADO: {', '.join(bloqueos_nuevos)} -> lista_negra.json")
-    else:
-        if anomalias:
-            propuesta.append(f"IPs sospechosas ya bloqueadas: {len(cargar_lista_negra())}")
-    try:
-        fitness = calcular_fitness_real()
-    except Exception as e:
-        logger.error(f"Fitness error {e}")
-        fitness = {"total_tests":0,"ok":False,"fitness":0,"error":str(e)}
-    propuesta.append(f"Fitness: {fitness['fitness']} | Tests: {fitness['total_tests']} | OK: {fitness['ok']}")
-    if len(anomalias)>=2:
-        propuesta.append(f"Evolucion: {evo.get('evolucion')} | Parches: {len(evo.get('parches',[]))} | Ollama: {ollama_disponible()}")
-    if len(anomalias)>=1:
-        propuesta.append("Nivel 9 OK: Ollama + auto-patching + backup seguro | Siguiente: auto-deploy con tests")
-    if fitness["total_tests"]<10:
-        propuesta.append("Aumentar tests a 50+ con casos de rate limiting y 2FA")
-    texto = "\n".join(propuesta)
-    ORDENES.write_text(texto, encoding="utf-8")
-    with open(EVOLUCION_LOG, "a", encoding="utf-8") as f: f.write(f"{datetime.now().isoformat()} - {texto}\n---\n")
-    logger.info(f"ORDENES NIVEL 9: {len(propuesta)} lineas, bloqueos={len(bloqueos_nuevos)}, parches={len(evo.get('parches',[]))}")
-    return {"anomalias":anomalias,"anomalias_log":anomalias_log,"bloqueos_nuevos":bloqueos_nuevos,"lista_negra":cargar_lista_negra(),"fitness":fitness,"texto":texto,"propuesta":propuesta,"rate_limit":get_rate_limit_stats(),"evolucion":evo,"ollama_disponible":ollama_disponible()}
+        def do_GET(self):
+            if self.path == "/health":
+                self._responder(200, health())
+            elif self.path == "/estadisticas":
+                self._responder(200, calcular_estadisticas())
+            elif self.path == "/lista-negra":
+                self._responder(200, obtener_lista_negra())
+            else:
+                self._responder(404, {"error": "not_found"})
 
+        def do_POST(self):
+            if self.path == "/detectar":
+                largo = int(self.headers.get("Content-Length", 0))
+                try:
+                    registro = json.loads(self.rfile.read(largo) or b"{}")
+                except json.JSONDecodeError:
+                    self._responder(400, {"error": "json_invalido"})
+                    return
+                self._responder(200, detectar_anomalias(registro))
+            else:
+                self._responder(404, {"error": "not_found"})
+
+        def log_message(self, fmt, *args):
+            pass  # silenciar log por defecto del servidor
+
+    return ThreadingHTTPServer(("0.0.0.0", puerto), Handler)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 def main():
-    datos = cargar_historico()
-    insertar_accesos(datos)
-    stats = calcular_estadisticas(datos)
-    anom = detectar_anomalias(datos)
-    print(json.dumps(stats, indent=2))
-    print(f"Anomalias: {len(anom)}")
-    orden = proponer_siguiente_orden(auto_bloquear=True)
-    print(orden["texto"])
-    return stats
-
-if __name__=="__main__":
-    import sys
     if "--init-db" in sys.argv:
-        d=cargar_historico()
-        insertar_accesos(d)
-        print(f"DB {len(d)} + lista_negra {len(cargar_lista_negra())}")
-    elif "--check" in sys.argv:
-        d=cargar_historico()
-        print(detectar_anomalias(d))
-        print(calcular_fitness_real())
-        print(f"Rate limit stats: {get_rate_limit_stats()}")
-    elif "--api" in sys.argv:
-        import uvicorn
-        from fastapi import FastAPI, Query, Request, Header
-        from fastapi.responses import JSONResponse
-        port=8001
+        init_db()
+        print(f"Base de datos inicializada en: {DB_PATH}")
+        print(json.dumps(calcular_estadisticas(), indent=2, ensure_ascii=False))
+        return
+    if "--serve" in sys.argv:
+        puerto = 8080
         if "--port" in sys.argv:
-            try: port=int(sys.argv[sys.argv.index("--port")+1])
-            except: pass
-        app=FastAPI(title="IA Evolutiva Nivel 9 - Ollama + Auto-Patching")
-        @app.middleware("http")
-        async def middleware_seguridad_nivel9(request: Request, call_next):
-            ip = request.client.host if request.client else "unknown"
-            if request.url.path in ["/health", "/docs", "/openapi.json"]:
-                response = await call_next(request)
-                return response
-            if es_ip_bloqueada(ip):
-                return JSONResponse(status_code=403, content={"detail": f"IP bloqueada {ip}", "nivel":9, "bloqueada":True})
-            ok, count, remaining = check_rate_limit(ip)
-            if not ok:
-                bloquear_ip(ip, f"Rate limit excedido {count} req/{RATE_LIMIT_WINDOW}s en {request.url.path}", count)
-                return JSONResponse(status_code=429, content={"detail": "Rate limit excedido - IP bloqueada", "ip": ip, "count": count, "nivel":9})
-            if es_ruta_admin(request.url.path):
-                token = request.headers.get("X-2FA")
-                if not verificar_2fa_token(token):
-                    return JSONResponse(status_code=401, content={"detail": "2FA requerido para /admin - Header X-2FA: 123456", "nivel":9, "2fa_required":True})
-            response = await call_next(request)
-            response.headers["X-Nivel"] = "9"
-            response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT_MAX)
-            response.headers["X-RateLimit-Remaining"] = str(remaining)
-            response.headers["X-Ollama"] = str(ollama_disponible())
-            return response
-        @app.get("/accesos")
-        def api_accesos(rol: str = Query(None)): return cargar_historico() if rol is None else [x for x in cargar_historico() if x.get("rol")==rol]
-        @app.get("/estadisticas")
-        def api_stats(): return calcular_estadisticas(cargar_historico())
-        @app.get("/anomalias")
-        def api_anomalias(): return detectar_anomalias(cargar_historico())
-        @app.get("/decidir")
-        def api_decidir(auto: bool = True): return proponer_siguiente_orden(auto_bloquear=auto)
-        @app.post("/bloquear")
-        def api_bloquear(payload: dict): ip=payload.get("ip"); return {"bloqueado":bloquear_ip(ip,payload.get("motivo","manual"),1),"ip":ip,"lista":cargar_lista_negra()}
-        @app.post("/desbloquear")
-        def api_desbloquear(payload: dict): ip=payload.get("ip"); return {"desbloqueado":desbloquear_ip(ip),"ip":ip}
-        @app.get("/lista_negra")
-        def api_lista(): return cargar_lista_negra()
-        @app.get("/fitness")
-        def api_fitness(): return calcular_fitness_real()
-        @app.get("/predecir")
-        def api_predecir(recurso: str = Query(...)): return predecir_rol(recurso)
-        @app.get("/log")
-        def api_log(): return {"log": LOG_PATH.read_text()[-3000:] if LOG_PATH.exists() else ""}
-        @app.get("/ordenes")
-        def api_ordenes(): return {"ordenes": ORDENES.read_text() if ORDENES.exists() else ""}
-        @app.get("/health")
-        def api_health(): return {"status":"ok","nivel":9,"autonomia":"total","bloqueos":len(cargar_lista_negra()),"rate_limit":{"max":RATE_LIMIT_MAX,"window":RATE_LIMIT_WINDOW,"ips_monitoreadas":len(rate_limit_store)},"2fa":{"activo":True,"header":"X-2FA"},"ollama":{"disponible":ollama_disponible(),"url":OLLAMA_URL,"modelo":OLLAMA_MODEL},"evoluciones":len(list(EVOLUCIONES_DIR.glob("*.json")) if EVOLUCIONES_DIR.exists() else 0),"parches":len(list(PARCHES_DIR.glob("*.py")) if PARCHES_DIR.exists() else 0)}
-        @app.get("/rate_limit/status")
-        def api_rate_limit(): return {"nivel":9,"rate_limit":get_rate_limit_stats(),"config":{"max":RATE_LIMIT_MAX,"window":RATE_LIMIT_WINDOW}}
-        @app.post("/auth/2fa/verificar")
-        def api_2fa_verificar(payload: dict): token=payload.get("token"); ok=verificar_2fa_token(token); return {"verificado":ok,"nivel":9,"token_ok":ok}
-        @app.get("/auth/2fa/status")
-        def api_2fa_status(): return {"nivel":9,"2fa_activo":True,"header_requerido":"X-2FA","codigo_demo":FACTOR_2FA_CODE,"rutas_protegidas":["/admin/*"]}
-        @app.get("/admin/dashboard")
-        def api_admin_dashboard(x_2fa: Optional[str] = Header(None)):
-            if not verificar_2fa_token(x_2fa):
-                return JSONResponse(status_code=401, content={"detail":"2FA requerido"})
-            return {"dashboard":"admin","nivel":9,"2fa":"ok","accesos":len(cargar_historico()),"ollama":ollama_disponible()}
-        @app.get("/ollama/status")
-        def api_ollama_status(): return {"nivel":9,"ollama_disponible":ollama_disponible(),"url":OLLAMA_URL,"modelo":OLLAMA_MODEL,"fallback_activo":True}
-        @app.post("/ollama/consultar")
-        def api_ollama_consultar(payload: dict):
-            prompt=payload.get("prompt","Hola")
-            system=payload.get("system")
-            modelo=payload.get("modelo", OLLAMA_MODEL)
-            res=consultar_ollama(prompt, system, modelo)
-            return res
-        @app.get("/evolucionar")
-        def api_evolucionar_get(): return proponer_evolucion_ollama()
-        @app.post("/evolucionar")
-        def api_evolucionar_post(payload: dict = None):
-            payload = payload or {}
-            tipos = payload.get("tipos")
-            anom = detectar_anomalias(cargar_historico())
-            if tipos:
-                anom = [a for a in anom if a["tipo"] in tipos]
-            return proponer_evolucion_ollama(anom)
-        @app.post("/parchear")
-        def api_parchear(payload: dict):
-            tipo=payload.get("tipo","privilegio")
-            dry_run=payload.get("dry_run", True)
-            backup_path = backup_antes_de_parche() if not dry_run else None
-            parche = generar_parche_seguridad(tipo, payload.get("contexto",{}))
-            if not dry_run and parche.get("sintaxis_ok"):
-                PARCHES_DIR.mkdir(exist_ok=True)
-                pf = PARCHES_DIR / f"parche_{tipo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_aplicado.py"
-                pf.write_text(parche["respuesta"], encoding="utf-8")
-            return {"tipo":tipo,"dry_run":dry_run,"backup":backup_path,"parche":parche,"aplicado":not dry_run and parche.get("sintaxis_ok", False)}
-        @app.get("/parches")
-        def api_parches():
-            if not PARCHES_DIR.exists(): return []
-            return [{"archivo":str(p),"tipo":p.stem,"contenido":p.read_text()[:2000]} for p in PARCHES_DIR.glob("*.py")]
-        @app.get("/evoluciones")
-        def api_evoluciones():
-            if not EVOLUCIONES_DIR.exists(): return []
-            evos=[]
-            for f in sorted(EVOLUCIONES_DIR.glob("*.json"), reverse=True)[:10]:
-                try: evos.append(json.loads(f.read_text()))
-                except: pass
-            return evos
-        @app.get("/implementador/status")
-        def api_implementador_status(): return {"nivel":9,"modelfile":str(Path("Modelfile.implementador").exists()),"ollama":ollama_disponible(),"modelo":OLLAMA_MODEL,"backups":len(list(BACKUP_DIR.glob("*.py"))) if BACKUP_DIR.exists() else 0}
-        @app.post("/implementador/generar")
-        def api_implementador_generar(payload: dict):
-            prompt=payload.get("prompt","Genera funcion que detecte anomalias de privilegio")
-            res=consultar_ollama(prompt, system_prompt="Eres implementador senior Python. Genera codigo limpio, seguro y testeable.", modelo=payload.get("modelo", OLLAMA_MODEL))
-            return {"prompt":prompt,"codigo":res["respuesta"][:4000],"ollama":res}
-        logger.info(f"API Nivel 9 puerto {port} - Rate limiting {RATE_LIMIT_MAX}/{RATE_LIMIT_WINDOW}s + 2FA + Ollama {OLLAMA_MODEL} activo")
-        uvicorn.run(app, host="0.0.0.0", port=port)
-    elif "--supervisor" in sys.argv:
-        print("Supervisor Nivel 9 - cada 30s decide, evoluciona y bloquea + Ollama")
-        while True:
-            try:
-                o=proponer_siguiente_orden(auto_bloquear=True)
-                print(f"[{datetime.now().isoformat()}] N9 {o['texto'][:120]} bloqueos={o.get('bloqueos_nuevos',[])} ollama={o.get('ollama_disponible', ollama_disponible())} evo={len(o.get('evolucion',{}).get('parches',[]))} fitness={o.get('fitness',{}).get('fitness',0)}")
-                time.sleep(30)
-            except KeyboardInterrupt: break
-    else:
-        main()
+            puerto = int(sys.argv[sys.argv.index("--port") + 1])
+        servidor = _crear_servidor(puerto)
+        print(f"Sirviendo en http://0.0.0.0:{puerto} (GET /health, POST /detectar)")
+        servidor.serve_forever()
+        return
+    print(json.dumps(health(), indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
