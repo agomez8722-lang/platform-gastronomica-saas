@@ -101,7 +101,18 @@ def init_db():
     con.commit(); con.close()
 
 class Item(BaseModel):
-    nombre:str; qty:int=1; notas:Optional[str]=""
+    nombre: str
+    qty: int = 1
+    notas: Optional[str] = ""
+    image_url: Optional[str] = None
+
+    def to_dict(self):
+        try:
+            return self.model_dump()
+        except:
+            return self.dict()
+
+
 class PedidoCreate(BaseModel):
     mesa:str; items:List[Item]; total:int=0; estacion:str="caliente"; notas:Optional[str]=""
 class PedidoUpdate(BaseModel):
@@ -122,7 +133,16 @@ def get_all():
 def startup(): init_db(); print(f"KDS + IA Nivel 12 listo - DB {DB_PATH}")
 
 @app.get("/")
-def root(): return {"status":"ok","nivel":12,"fitness":200,"ia":True}
+def root():
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse("""
+    <html><body style="font-family:system-ui;background:#0f0f0f;color:white;text-align:center;padding:40px">
+    <h1>🍔 Plataforma Gastronómica SaaS + IA Nivel 13</h1>
+    <img src="https://images.unsplash.com/photo-1568909344668-6f14a07b56a0?w=800" style="width:100%;max-width:600px;border-radius:16px;margin:20px 0">
+    <p>Nivel 12 | Fitness 200 | Detectores 10 | Pedidos 6 | SSE 1</p>
+    <p><a href="/health" style="color:#f59e0b">/health</a> | <a href="/api/cocina/pedidos" style="color:#f59e0b">/api/cocina/pedidos</a> | <a href="http://localhost:5173" style="color:#f59e0b">KDS 5173</a></p>
+    </body></html>
+    """)
 
 @app.get("/health")
 def health():
@@ -146,9 +166,9 @@ async def crear(p: PedidoCreate, request: Request):
     numero=f"PED-{int(time.time())%100000:05d}"; now=datetime.now().isoformat()
     con=sqlite3.connect(DB_PATH); cur=con.cursor()
     cur.execute("INSERT INTO pedidos (numero,mesa,estado,items,total,estacion,notas,created_at,updated_at,ip,motivos) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (numero,p.mesa,"nuevo" if not ia["anomalo"] else "bloqueado",json.dumps([i.dict() for i in p.items],ensure_ascii=False),p.total,p.estacion,p.notas,now,now,ip,json.dumps(ia["motivos"])))
+        (numero,p.mesa,"nuevo" if not ia["anomalo"] else "bloqueado",json.dumps([i.to_dict() for i in p.items],ensure_ascii=False),p.total,p.estacion,p.notas,now,now,ip,json.dumps(ia["motivos"])))
     con.commit(); pid=cur.lastrowid; con.close()
-    pedido={"id":pid,"numero":numero,"mesa":p.mesa,"estado":"nuevo" if not ia["anomalo"] else "bloqueado","items":[i.dict() for i in p.items],"total":p.total,"estacion":p.estacion,"notas":p.notas,"created_at":now,"updated_at":now,"ia":ia}
+    pedido={"id":pid,"numero":numero,"mesa":p.mesa,"estacion":p.estacion,"estado":"nuevo" if not ia["anomalo"] else "bloqueado","items":[i.to_dict() for i in p.items],"total":p.total,"estacion":p.estacion,"notas":p.notas,"created_at":now,"updated_at":now,"ia":ia}
 
     if ia["anomalo"]:
         await manager.broadcast("pedido_bloqueado",pedido)
