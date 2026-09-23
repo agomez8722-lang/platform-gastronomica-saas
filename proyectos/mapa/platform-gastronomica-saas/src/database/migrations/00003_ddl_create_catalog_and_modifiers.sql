@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS categorias_menu (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, name TEXT NOT NULL, UNIQUE(id, tenant_id));
+CREATE TABLE IF NOT EXISTS productos (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, categoria_id UUID NOT NULL, name TEXT NOT NULL, price NUMERIC(12,2) NOT NULL, UNIQUE(id, tenant_id), FOREIGN KEY (categoria_id, tenant_id) REFERENCES categorias_menu(id, tenant_id));
+CREATE TABLE IF NOT EXISTS modifiers (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, name TEXT NOT NULL, price_delta NUMERIC(12,2) DEFAULT 0, UNIQUE(id, tenant_id));

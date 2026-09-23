@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS caja_turnos (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, sede_id UUID NOT NULL, opened_by UUID NOT NULL, closed_by UUID, saldo_inicial NUMERIC(12,2) NOT NULL, saldo_final NUMERIC(12,2), status TEXT DEFAULT 'ABIERTO', UNIQUE(id, tenant_id));
+CREATE OR REPLACE FUNCTION prevent_locked_update() RETURNS TRIGGER AS $$ BEGIN IF OLD.status='CERRADO' THEN RAISE EXCEPTION 'No se puede modificar un turno cerrado - audit immutable'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_caja_immutable ON caja_turnos; CREATE TRIGGER trg_caja_immutable BEFORE UPDATE ON caja_turnos FOR EACH ROW EXECUTE FUNCTION prevent_locked_update();

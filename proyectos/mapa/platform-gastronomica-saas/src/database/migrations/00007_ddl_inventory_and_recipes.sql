@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS insumos (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, name TEXT NOT NULL, stock NUMERIC(12,2) DEFAULT 0, unidad TEXT DEFAULT 'kg', UNIQUE(id, tenant_id));
+CREATE TABLE IF NOT EXISTS recetas (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, producto_id UUID NOT NULL, insumo_id UUID NOT NULL, cantidad NUMERIC(12,4) NOT NULL, UNIQUE(id, tenant_id), FOREIGN KEY (producto_id, tenant_id) REFERENCES productos(id, tenant_id), FOREIGN KEY (insumo_id, tenant_id) REFERENCES insumos(id, tenant_id));
+CREATE TABLE IF NOT EXISTS proveedores (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, name TEXT NOT NULL, telefono TEXT, email TEXT, UNIQUE(id, tenant_id));
+CREATE TABLE IF NOT EXISTS ordenes_compra (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, proveedor_id UUID NOT NULL, total NUMERIC(12,2) DEFAULT 0, estado TEXT DEFAULT 'PENDIENTE_APROBACION', UNIQUE(id, tenant_id));
+ALTER TABLE caja_turnos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON caja_turnos; CREATE POLICY tenant_isolation ON caja_turnos FOR ALL USING (tenant_id = current_tenant_id()) WITH CHECK (tenant_id = current_tenant_id());

@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS mesas (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, sede_id UUID NOT NULL, numero INT NOT NULL, capacidad INT DEFAULT 4, estado TEXT DEFAULT 'LIBRE', UNIQUE(id, tenant_id), UNIQUE(tenant_id, sede_id, numero), FOREIGN KEY (sede_id, tenant_id) REFERENCES sedes(id, tenant_id));
+CREATE TABLE IF NOT EXISTS staff (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL, sede_id UUID, email TEXT NOT NULL, role TEXT NOT NULL, UNIQUE(id, tenant_id), UNIQUE(tenant_id, email));
