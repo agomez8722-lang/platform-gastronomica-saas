@@ -41,3 +41,11 @@ sleep 3; curl -s http://localhost:8000/health | python3 -m json.tool; curl -s ht
 - Git commits: 617df2c fix 4 rutas + 4590248 evolucion 10 detectores
 - REPORT.md + REPORT_CONTINUACION.md actualizados
 - levantar_todo.sh operativo
+
+## FIX IMAGEN 23-09-2026 15:10 - 8/8 con foto real
+- backend/app.py: Item con image_url Optional + to_dict() model_dump() fix POST PED-94224
+- pedidos.db: UPDATE 6 pedidos + fix PED-94084 -> 8/8 con image_url 16:9 Unsplash
+- KDS.jsx: ya tenía FOOD_IMAGES + getFoodImage() + object-cover + fallback por categoria
+- root /: HTMLResponse con <img w=800> burger premium + links health/pedidos/KDS
+- Build: 2865 modules 896kB gzip 267kB 748ms
+- Commit: 482086e fix image_url persistente
