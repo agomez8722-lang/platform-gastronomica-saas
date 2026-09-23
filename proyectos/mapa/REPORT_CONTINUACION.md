@@ -57,3 +57,10 @@ sleep 3; curl -s http://localhost:8000/health | python3 -m json.tool; curl -s ht
 - Pedidos: 9/9 con image_url 16:9 (Burger Doble + Pizza Margarita)
 - Tests: 32 OK
 - Docker: docker-compose.yml + backend/Dockerfile listo para docker-compose up --build
+
+## EVOLUCION NIVEL 15 - 14 detectores
+- evolutivo_real.py: 12 -> 14
+- Nuevos: detectar_ldap_injection_v14 (*(), (|, ldap://) + detectar_open_redirect_v14 (//evil.com, @evil, redirect=http)
+- Health: 14 fitness 200 genoma 5/6/32
+- Pedidos: 9/9 con image_url 16:9
+- Tests: 32 OK

@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   backend-ia:
-    build:./backend
+    build: ./backend
     ports: ["8000:8000"]
     volumes: ["./backend:/app", "./backend/pedidos.db:/app/pedidos.db"]
     environment: ["PYTHONUNBUFFERED=1"]
