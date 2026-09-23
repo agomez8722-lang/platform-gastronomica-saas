@@ -69,3 +69,11 @@ def detectar_xss_v12(r: dict) -> bool:
 def detectar_command_injection_v12(r: dict) -> bool:
     cmd = [";cat ", "|cat", "&& ls", "`id`", "$(id)"]
     return any(c in r.get("recurso","").lower() for c in cmd)
+
+def detectar_ssrf_v13(r: dict) -> bool:
+    ssrf = ["127.0.0.1", "localhost", "169.254.169.254", "metadata.google", "internal"]
+    return any(s in r.get("recurso","").lower() for s in ssrf)
+
+def detectar_xxe_v13(r: dict) -> bool:
+    xxe = ["<!entity", "<!doctype", "xxe", "xml external"]
+    return any(x in r.get("recurso","").lower() for x in xxe)

@@ -49,3 +49,11 @@ sleep 3; curl -s http://localhost:8000/health | python3 -m json.tool; curl -s ht
 - root /: HTMLResponse con <img w=800> burger premium + links health/pedidos/KDS
 - Build: 2865 modules 896kB gzip 267kB 748ms
 - Commit: 482086e fix image_url persistente
+
+## EVOLUCION NIVEL 14 - 12 detectores
+- evolutivo_real.py: 10 -> 12 detectores
+- Nuevos: detectar_ssrf_v13 (127.0.0.1, localhost, 169.254.169.254, metadata.google) + detectar_xxe_v13 (<!entity, <!doctype, xxe)
+- Health: detectores_dinamicos 12 fitness 200 genoma 5/6/32
+- Pedidos: 9/9 con image_url 16:9 (Burger Doble + Pizza Margarita)
+- Tests: 32 OK
+- Docker: docker-compose.yml + backend/Dockerfile listo para docker-compose up --build
