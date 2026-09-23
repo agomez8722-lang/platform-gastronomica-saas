@@ -12,7 +12,7 @@ class TestNivel12(unittest.TestCase):
         self.assertEqual(g["rate_limit_ventana"], 32)
     def test_evolutivo_8_detectores(self):
         code = pathlib.Path("evolutivo_real.py").read_text()
-        self.assertGreaterEqual(code.count("def detectar_"), 8)
+        self.assertGreaterEqual(code.count("def detectar_"), 10)
     def test_evolutivo_ast_valido(self):
         code = pathlib.Path("evolutivo_real.py").read_text()
         ast.parse(code)
