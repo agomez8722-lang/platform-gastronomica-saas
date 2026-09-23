@@ -83,3 +83,9 @@ def detectar_ldap_injection_v14(r: dict) -> bool:
 
 def detectar_open_redirect_v14(r: dict) -> bool:
     return any(x in r.get("recurso","").lower() for x in ["//evil.com","https://evil","@evil","redirect=http"])
+
+def detectar_crlf_injection_v15(r: dict) -> bool:
+    return any(x in r.get("recurso","") for x in ["%0d%0a", "\r\n", "crlf", "%0A%0D"])
+
+def detectar_host_header_v15(r: dict) -> bool:
+    return any(x in r.get("recurso","").lower() for x in ["evil.com", "host: evil", "x-forwarded-host: evil"])
