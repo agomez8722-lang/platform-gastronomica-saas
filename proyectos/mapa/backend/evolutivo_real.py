@@ -90,3 +90,24 @@ def detectar_ssti_v17(r: dict) -> bool:
 def detectar_log4shell_v17(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
     return "${jndi:" in recurso or "log4shell" in recurso or "${env:" in recurso
+
+def detectar_jwt_v18(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    auth = r.get("authorization","").lower()
+    return "eyj" in recurso or "eyj" in auth or "jwt" in recurso or "alg:none" in recurso
+
+def detectar_csrf_v18(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "csrf" in recurso or "xsrf" in recurso or "csrf_bypass" in recurso
+
+def detectar_file_upload_v19(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return ("upload" in recurso and ".php" in recurso) or "file_upload" in recurso or "shell.php" in recurso
+
+def detectar_xxe_billion_laughs_v19(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "billion" in recurso or "xxe_billion" in recurso or "lol" in recurso
+
+def detectar_open_redirect_data_uri_v19(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "data:[STRIPPED] in recurso or "data:application" in recurso or "redirect_data" in recurso
