@@ -1,11 +1,11 @@
 services:
   backend-ia:
-    build:./backend
+    build: ./backend
     ports:
       - "8000:8000"
     volumes:
-      -./backend:/app
-      -./backend/pedidos.db:/app/pedidos.db
+      - "./backend:/app"
+      - "./backend/pedidos.db:/app/pedidos.db"
     environment:
       - PYTHONUNBUFFERED=1
     command: python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
@@ -15,8 +15,8 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      -./platform-gastronomica-saas:/app
-      -./platform-gastronomica-saas/node_modules:/app/node_modules
+      - "./platform-gastronomica-saas:/app"
+      - "./platform-gastronomica-saas/node_modules:/app/node_modules"
     command: sh -c "npm install --silent && npm run dev -- --host 0.0.0.0 --port 3001"
   kds-front:
     image: node:20-alpine
@@ -24,8 +24,8 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      -./platform-gastronomica-saas:/app
-      -./platform-gastronomica-saas/node_modules:/app/node_modules
+      - "./platform-gastronomica-saas:/app"
+      - "./platform-gastronomica-saas/node_modules:/app/node_modules"
     command: sh -c "npx vite --host 0.0.0.0 --port 5173"
   redis:
     image: redis:alpine
