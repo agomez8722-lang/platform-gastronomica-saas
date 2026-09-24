@@ -1,16 +1,14 @@
-import ast, json, os, time, pathlib, fcntl, re, urllib.parse
-from typing import Dict, List
+import ast, json, os, sys, time, pathlib, fcntl, urllib.parse
+from typing import Dict
 import importlib.util
-
-# ENV + Genoma - lee de.env
 from dotenv import load_dotenv
 load_dotenv()
+
 GENOMA_PATH = os.getenv("GENOMA_PATH", "genoma_evolutivo.json")
 BLACKLIST_PATH = os.getenv("BLACKLIST_PATH", "lista_negra.json")
 EVOLUTIVO_PATH = os.getenv("EVOLUTIVO_PATH", "evolutivo_real.py")
-BLACKLIST_TTL = int(os.getenv("BLACKLIST_TTL", "3600"))
-
-_GENOMA_ACTUAL = {"umbral_bloqueo": 5, "rate_limit_umbral": 6, "rate_limit_ventana": 32}
+GENOMA_DEFAULT = {"umbral_bloqueo": 5, "rate_limit_umbral": 6, "rate_limit_ventana": 32}
+_GENOMA_ACTUAL = dict(GENOMA_DEFAULT)
 
 def genoma_actual() -> Dict:
     global _GENOMA_ACTUAL
@@ -26,23 +24,31 @@ def cargar_memoria_inmunologica() -> Dict:
     if not os.path.exists(BLACKLIST_PATH):
         return {}
     try:
-        # Lock para evitar race condition
         with open(BLACKLIST_PATH, "r") as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
+            try:
+                fcntl.flock(f, fcntl.LOCK_SH)
+            except:
+                pass
             data = json.load(f)
-            fcntl.flock(f, fcntl.LOCK_UN)
-            # TTL - limpia viejas
-            now = time.time()
-            cleaned = {ip: v for ip, v in data.items() if isinstance(v, dict) and now - v.get("ts", 0) < BLACKLIST_TTL or isinstance(v, int)}
-            return cleaned
+            try:
+                fcntl.flock(f, fcntl.LOCK_UN)
+            except:
+                pass
+            return data
     except:
         return {}
 
 def guardar_memoria_inmunologica(mem: Dict):
     with open(BLACKLIST_PATH, "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX)
+        except:
+            pass
         f.write(json.dumps(mem, indent=2, ensure_ascii=False))
-        fcntl.flock(f, fcntl.LOCK_UN)
+        try:
+            fcntl.flock(f, fcntl.LOCK_UN)
+        except:
+            pass
 
 def registrar_memoria_inmunologica(ip: str, anomalo: bool):
     if not anomalo or not ip:
@@ -54,16 +60,11 @@ def registrar_memoria_inmunologica(ip: str, anomalo: bool):
     entry["count"] = entry.get("count",0) + 1
     entry["ts"] = time.time()
     mem[ip] = entry
-    if entry["count"] >= genoma_actual().get("umbral_bloqueo", 5):
-        guardar_memoria_inmunologica(mem)
-    else:
-        guardar_memoria_inmunologica(mem)
+    guardar_memoria_inmunologica(mem)
 
 def normalizar_recurso(recurso: str) -> str:
-    # Decodifica %20, doble encode, lower
     try:
-        r = urllib.parse.unquote_plus(urllib.parse.unquote_plus(recurso)).lower()
-        return r
+        return urllib.parse.unquote_plus(urllib.parse.unquote_plus(recurso)).lower()
     except:
         return recurso.lower()
 
@@ -81,14 +82,11 @@ def _evaluar_reglas(registro: Dict, store: Dict) -> Dict:
                 detectores.append(getattr(mod, name))
     except Exception as e:
         detectores = []
-
     anomalo = False
     motivos = []
     ip = registro.get("ip","")
-    # Normaliza recurso una vez
     if "recurso" in registro:
         registro["recurso_norm"] = normalizar_recurso(registro.get("recurso",""))
-
     for det in detectores:
         try:
             if "rate_limit" in det.__name__:
@@ -101,7 +99,6 @@ def _evaluar_reglas(registro: Dict, store: Dict) -> Dict:
                     motivos.append(det.__name__)
         except:
             continue
-
     if ip and ip in store:
         ventana = genoma.get("rate_limit_ventana", 32)
         umbral = genoma.get("rate_limit_umbral", 6)
@@ -109,7 +106,6 @@ def _evaluar_reglas(registro: Dict, store: Dict) -> Dict:
         if len(recent) >= umbral and "rate_limit_genetico" not in motivos:
             anomalo = True
             motivos.append("rate_limit_genetico")
-
     return {"anomalo": anomalo, "motivos": motivos, "genoma": genoma, "detectores": len(detectores)}
 
 def health():
@@ -121,7 +117,6 @@ def health():
         detectores = len([l for l in codigo.splitlines() if "def detectar_" in l])
     except:
         detectores = 0
-    # Nivel 24 -> 50 detectores = 500
     if detectores >= 50:
         nivel, fitness = 24, 500
     elif detectores >= 45:
@@ -133,6 +128,7 @@ def health():
     return {"nivel": nivel, "fitness": fitness, "detectores_dinamicos": detectores, "genoma": genoma, "ips_bloqueadas": len(mem)}
 
 if __name__ == "__main__":
-    import sys
     if "--check" in sys.argv:
+        print(json.dumps(health(), indent=2, ensure_ascii=False))
+    else:
         print(json.dumps(health(), indent=2, ensure_ascii=False))
