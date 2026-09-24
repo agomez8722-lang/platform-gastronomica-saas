@@ -95,3 +95,21 @@ def detectar_prototype_pollution_v16(r: dict) -> bool:
 
 def detectar_nosql_injection_v16(r: dict) -> bool:
     return any(x in r.get("recurso","").lower() for x in ["$where", "$ne", "$gt", "[$ne]", "nosql"])
+
+def detectar_ssti_v17(r: dict) -> bool:
+    payloads = ["{{7*7}}", "${7*7}", "<%=", "{{config", "__class__", "{{self}}"]
+    recurso = r.get("recurso","").lower()
+    return any(p in recurso for p in payloads)
+
+def detectar_log4shell_v17(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "${jndi:" in recurso or "log4shell" in recurso or "${env:" in recurso or "${sys:" in recurso
+
+def detectar_ssti_v17(r: dict) -> bool:
+    payloads = ["{{7*7}}", "${7*7}", "<%=", "{{config", "__class__"]
+    recurso = r.get("recurso","").lower()
+    return any(p in recurso for p in payloads)
+
+def detectar_log4shell_v17(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "${jndi:" in recurso or "log4shell" in recurso or "${env:" in recurso
