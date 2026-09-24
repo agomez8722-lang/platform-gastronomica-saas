@@ -89,3 +89,9 @@ def detectar_crlf_injection_v15(r: dict) -> bool:
 
 def detectar_host_header_v15(r: dict) -> bool:
     return any(x in r.get("recurso","").lower() for x in ["evil.com", "host: evil", "x-forwarded-host: evil"])
+
+def detectar_prototype_pollution_v16(r: dict) -> bool:
+    return any(x in r.get("recurso","").lower() for x in ["__proto__", "constructor.prototype", "prototype pollution"])
+
+def detectar_nosql_injection_v16(r: dict) -> bool:
+    return any(x in r.get("recurso","").lower() for x in ["$where", "$ne", "$gt", "[$ne]", "nosql"])
