@@ -151,3 +151,24 @@ def detectar_host_header_injection_v21(r: dict) -> bool:
 def detectar_log4shell_bypass_v21(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
     return "${jndi:ldap://${env:" in recurso or "log4shell_bypass" in recurso
+
+
+def detectar_xxe_advanced_v22(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "<!entity" in recurso and "system" in recurso or "xxe_advanced" in recurso
+
+def detectar_ssrf_bypass_v22(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "0.0.0.0" in recurso or "127.0.0.1%09" in recurso or "ssrf_bypass" in recurso
+
+def detectar_open_redirect_js_v22(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "javascript:window.location" in recurso or "data:text/html;base64" in recurso
+
+def detectar_host_header_injection_v22(r: dict) -> bool:
+    host = r.get("host","").lower()
+    return "evil.com%09" in host or "host_injection" in host
+
+def detectar_log4shell_bypass_v22(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "${jndi:ldap://${env:" in recurso or "log4shell_bypass" in recurso

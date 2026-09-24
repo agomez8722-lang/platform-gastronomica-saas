@@ -31,7 +31,10 @@ def health():
         detectores=len([l for l in codigo.splitlines() if "def detectar_" in l])
     except:
         detectores=0
-    if detectores>=35:
+    if detectores>=40:
+        nivel=22
+        fitness=400
+    elif detectores>=35:
         nivel=21
         fitness=350
     elif detectores>=30:
