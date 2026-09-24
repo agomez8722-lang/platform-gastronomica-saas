@@ -1,4 +1,5 @@
 import asyncio, json, sqlite3, time, pathlib, ast, importlib.util
+from main import health as health_evolutivo
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
