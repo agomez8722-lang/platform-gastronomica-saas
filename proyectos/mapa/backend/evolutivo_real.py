@@ -111,3 +111,23 @@ def detectar_xxe_billion_laughs_v19(r: dict) -> bool:
 def detectar_open_redirect_data_uri_v19(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
     return "data:text" in recurso or "data:application" in recurso or "redirect_data" in recurso
+
+def detectar_graphql_introspection_v20(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "graphql" in recurso or "__schema" in recurso or "introspection" in recurso
+
+def detectar_java_deserialization_v20(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "rO0AB" in recurso or "deserialization" in recurso or "objectinputstream" in recurso
+
+def detectar_advanced_ssti_v20(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "self.__class__" in recurso or "mro()" in recurso or "subclasses" in recurso
+
+def detectar_jwt_kid_injection_v20(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "kid=" in recurso or "jwt_kid" in recurso or "jku" in recurso or "x5u" in recurso
+
+def detectar_http_request_smuggling_v20(r: dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "smuggling" in recurso or "cl.te" in recurso or "te.cl" in recurso

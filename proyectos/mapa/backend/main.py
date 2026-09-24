@@ -86,7 +86,7 @@ class MotorEvolutivoNivel10:
         registro = {"rol": "user", "recurso": "/admin/panel", "ip": "10.10.10.1", "hora": "02:00:00"}
         resultado = _evaluar_reglas(registro, store)
         registrar_memoria_inmunologica(registro.get("ip"), resultado["anomalo"])
-        return {"nivel": 12, "fitness": 200 if resultado["detectores"] >= 8 else 150, "detectores_dinamicos": resultado["detectores"], "genoma": genoma_actual(), "recarga_aplicada": False, "motivos": resultado["motivos"]}
+        return {"nivel": 20, "fitness": 200 if resultado["detectores"] >= 8 else 150, "detectores_dinamicos": resultado["detectores"], "genoma": genoma_actual(), "recarga_aplicada": False, "motivos": resultado["motivos"]}
 
 def init_db():
     con = sqlite3.connect(DB_PATH)
@@ -103,7 +103,7 @@ def health():
         detectores = len([l for l in codigo.splitlines() if "def detectar_" in l])
     except:
         detectores = 0
-    return {"nivel": 12, "fitness": 200 if detectores>=8 else 150, "detectores_dinamicos": detectores, "genoma": genoma, "ips_bloqueadas": len(mem)}
+    return {"nivel": 20, "fitness": 300 if detectores>=30 else 250 if detectores>=25 else 200 if detectores>=8 else 150, "detectores_dinamicos": detectores, "genoma": genoma, "ips_bloqueadas": len(mem)}
 
 if __name__ == "__main__":
     if "--init-db" in sys.argv:
