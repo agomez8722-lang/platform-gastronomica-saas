@@ -67,7 +67,7 @@ def detectar_open_redirect_v14(r: dict) -> bool:
 
 def detectar_crlf_injection_v15(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
-    return "%0d%0a" in recurso or "\r\n" in recurso or "crlf" in recurso
+    return "%0d%0a" in recurso or "crlf" in recurso
 
 def detectar_host_header_v15(r: dict) -> bool:
     host = r.get("host","").lower()
@@ -76,7 +76,7 @@ def detectar_host_header_v15(r: dict) -> bool:
 
 def detectar_prototype_pollution_v16(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
-    return "__proto__" in recurso or "prototype" in recurso or "constructor[prototype]" in recurso
+    return "__proto__" in recurso or "prototype" in recurso
 
 def detectar_nosql_injection_v16(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
@@ -98,7 +98,7 @@ def detectar_jwt_v18(r: dict) -> bool:
 
 def detectar_csrf_v18(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
-    return "csrf" in recurso or "xsrf" in recurso or "csrf_bypass" in recurso
+    return "csrf" in recurso or "xsrf" in recurso
 
 def detectar_file_upload_v19(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
@@ -106,8 +106,8 @@ def detectar_file_upload_v19(r: dict) -> bool:
 
 def detectar_xxe_billion_laughs_v19(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
-    return "billion" in recurso or "xxe_billion" in recurso or "lol" in recurso
+    return "billion" in recurso or "xxe_billion" in recurso
 
 def detectar_open_redirect_data_uri_v19(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
-    return "data:[STRIPPED] in recurso or "data:application" in recurso or "redirect_data" in recurso
+    return "data:text" in recurso or "data:application" in recurso or "redirect_data" in recurso
