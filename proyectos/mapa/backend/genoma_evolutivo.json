@@ -1,1 +1,10 @@
-../genoma_evolutivo.json
+{
+  "genoma": {
+    "umbral_bloqueo": 5,
+    "rate_limit_umbral": 6,
+    "rate_limit_ventana": 32
+  },
+  "fitness": 300,
+  "nivel": 20,
+  "detectores_dinamicos": 30
+}
