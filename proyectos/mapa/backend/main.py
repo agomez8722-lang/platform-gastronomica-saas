@@ -93,7 +93,7 @@ class MotorEvolutivoNivel10:
         registrar_memoria_inmunologica(registro.get("ip"), resultado["anomalo"])
         return {
             "nivel": 21,
-            "fitness": 300 if resultado["detectores"] >= 30 else 250 if resultado["detectores"] >=25 else 200 if resultado["detectores"] >=8 else 150,
+            "fitness": 350 if resultado["detectores"] >= 35 else 300 if resultado["detectores"] >= 30 else 250 if resultado["detectores"] >=25 else 200 if resultado["detectores"] >=8 else 150,
             "detectores_dinamicos": resultado["detectores"],
             "genoma": genoma_actual(),
             "recarga_aplicada": False,

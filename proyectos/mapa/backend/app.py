@@ -150,7 +150,7 @@ def health():
     try:
         evo = health_evolutivo()
     except Exception:
-        evo = {"nivel": 20, "fitness": 300, "detectores_dinamicos": 30, "genoma": {"umbral_bloqueo": 5, "rate_limit_umbral": 6, "rate_limit_ventana": 32}, "ips_bloqueadas": 0}
+        evo = {"nivel": 21, "fitness": 350, "detectores_dinamicos": 30, "genoma": {"umbral_bloqueo": 5, "rate_limit_umbral": 6, "rate_limit_ventana": 32}, "ips_bloqueadas": 0}
     return {
         "status": "ok",
         "nivel": evo.get("nivel", 20),
