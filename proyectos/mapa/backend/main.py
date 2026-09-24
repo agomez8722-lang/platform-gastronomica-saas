@@ -1,66 +1,34 @@
-import ast, json, os, sys, time, pathlib, fcntl, urllib.parse
+import ast, json, pathlib, importlib.util, sys
 from typing import Dict
-import importlib.util
-from dotenv import load_dotenv
-load_dotenv()
+BASE_DIR = pathlib.Path(__file__).parent
+GENOMA_PATH = BASE_DIR / "genoma_evolutivo.json"
+BLACKLIST_PATH = BASE_DIR / "lista_negra.json"
+EVOLUTIVO_PATH = BASE_DIR / "evolutivo_real.py"
+_GENOMA_ACTUAL = {"umbral_bloqueo": 5, "rate_limit_umbral": 6, "rate_limit_ventana": 32}
 
-GENOMA_PATH = os.getenv("GENOMA_PATH", "genoma_evolutivo.json")
-BLACKLIST_PATH = os.getenv("BLACKLIST_PATH", "lista_negra.json")
-EVOLUTIVO_PATH = os.getenv("EVOLUTIVO_PATH", "evolutivo_real.py")
-GENOMA_DEFAULT = {"umbral_bloqueo": 5, "rate_limit_umbral": 6, "rate_limit_ventana": 32}
-_GENOMA_ACTUAL = dict(GENOMA_DEFAULT)
-
-def genoma_actual() -> Dict:
+def genoma_actual():
     global _GENOMA_ACTUAL
-    if os.path.exists(GENOMA_PATH):
+    if GENOMA_PATH.exists():
         try:
-            data = json.loads(pathlib.Path(GENOMA_PATH).read_text(encoding="utf-8"))
+            data = json.loads(GENOMA_PATH.read_text())
             _GENOMA_ACTUAL = data.get("genoma", _GENOMA_ACTUAL)
-        except:
-            pass
+        except: pass
     return dict(_GENOMA_ACTUAL)
 
-def cargar_memoria_inmunologica() -> Dict:
-    if not os.path.exists(BLACKLIST_PATH):
-        return {}
-    try:
-        with open(BLACKLIST_PATH, "r") as f:
-            try:
-                fcntl.flock(f, fcntl.LOCK_SH)
-            except:
-                pass
-            data = json.load(f)
-            try:
-                fcntl.flock(f, fcntl.LOCK_UN)
-            except:
-                pass
-            return data
-    except:
-        return {}
+def cargar_memoria_inmunologica():
+    if BLACKLIST_PATH.exists():
+        try: return json.loads(BLACKLIST_PATH.read_text())
+        except: return {}
+    return {}
 
-def guardar_memoria_inmunologica(mem: Dict):
-    with open(BLACKLIST_PATH, "w") as f:
-        try:
-            fcntl.flock(f, fcntl.LOCK_EX)
-        except:
-            pass
-        f.write(json.dumps(mem, indent=2, ensure_ascii=False))
-        try:
-            fcntl.flock(f, fcntl.LOCK_UN)
-        except:
-            pass
+def guardar_memoria_inmunologica(mem):
+    BLACKLIST_PATH.write_text(json.dumps(mem, indent=2, ensure_ascii=False))
 
-def registrar_memoria_inmunologica(ip: str, anomalo: bool):
-    if not anomalo or not ip:
-        return
+def registrar_memoria_inmunologica(ip, anomalo):
     mem = cargar_memoria_inmunologica()
-    entry = mem.get(ip, {"count":0,"ts":time.time()})
-    if isinstance(entry, int):
-        entry = {"count": entry, "ts": time.time()}
-    entry["count"] = entry.get("count",0) + 1
-    entry["ts"] = time.time()
-    mem[ip] = entry
-    guardar_memoria_inmunologica(mem)
+    if anomalo and ip:
+        mem[ip] = mem.get(ip, 0) + 1
+        guardar_memoria_inmunologica(mem)
 
 def normalizar_recurso(recurso: str) -> str:
     try:
@@ -68,67 +36,66 @@ def normalizar_recurso(recurso: str) -> str:
     except:
         return recurso.lower()
 
-def _evaluar_reglas(registro: Dict, store: Dict) -> Dict:
+def _evaluar_reglas(registro: Dict, store: Dict):
     genoma = genoma_actual()
     detectores = []
     try:
-        codigo = pathlib.Path(EVOLUTIVO_PATH).read_text(encoding="utf-8")
+        codigo = EVOLUTIVO_PATH.read_text()
         ast.parse(codigo)
-        spec = importlib.util.spec_from_file_location("evolutivo_real", EVOLUTIVO_PATH)
+        spec = importlib.util.spec_from_file_location("evolutivo_real", str(EVOLUTIVO_PATH))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         for name in dir(mod):
             if name.startswith("detectar_"):
                 detectores.append(getattr(mod, name))
-    except Exception as e:
-        detectores = []
-    anomalo = False
-    motivos = []
-    ip = registro.get("ip","")
-    if "recurso" in registro:
-        registro["recurso_norm"] = normalizar_recurso(registro.get("recurso",""))
+    except: detectores = []
+    anomalo=False
+    motivos=[]
+    ip=registro.get("ip","")
     for det in detectores:
         try:
             if "rate_limit" in det.__name__:
                 if det(ip, store):
-                    anomalo = True
+                    anomalo=True
                     motivos.append(det.__name__)
             else:
                 if det(registro):
-                    anomalo = True
+                    anomalo=True
                     motivos.append(det.__name__)
-        except:
-            continue
-    if ip and ip in store:
-        ventana = genoma.get("rate_limit_ventana", 32)
-        umbral = genoma.get("rate_limit_umbral", 6)
-        recent = [t for t in store[ip] if time.time() - t < ventana]
-        if len(recent) >= umbral and "rate_limit_genetico" not in motivos:
-            anomalo = True
-            motivos.append("rate_limit_genetico")
+        except: continue
     return {"anomalo": anomalo, "motivos": motivos, "genoma": genoma, "detectores": len(detectores)}
 
 def health():
-    genoma = genoma_actual()
-    mem = cargar_memoria_inmunologica()
+    genoma=genoma_actual()
+    mem=cargar_memoria_inmunologica()
     try:
-        codigo = pathlib.Path(EVOLUTIVO_PATH).read_text(encoding="utf-8")
+        codigo=EVOLUTIVO_PATH.read_text()
         ast.parse(codigo)
-        detectores = len([l for l in codigo.splitlines() if "def detectar_" in l])
-    except:
-        detectores = 0
-    if detectores >= 50:
-        nivel, fitness = 24, 500
-    elif detectores >= 45:
-        nivel, fitness = 23, 450
-    elif detectores >= 40:
-        nivel, fitness = 22, 400
+        detectores=len([l for l in codigo.splitlines() if "def detectar_" in l])
+    except: detectores=0
+    if detectores>=50:
+        nivel=24
+        fitness=500
+    elif detectores>=45:
+        nivel=23
+        fitness=450
+    elif detectores>=40:
+        nivel=22
+        fitness=400
+    elif detectores>=35:
+        nivel=21
+        fitness=350
+    elif detectores>=30:
+        nivel=20
+        fitness=300
+    elif detectores>=25:
+        nivel=19
+        fitness=250
     else:
-        nivel, fitness = 12, 200
+        nivel=12
+        fitness=200 if detectores>=8 else 150
     return {"nivel": nivel, "fitness": fitness, "detectores_dinamicos": detectores, "genoma": genoma, "ips_bloqueadas": len(mem)}
 
 if __name__ == "__main__":
-    if "--check" in sys.argv:
-        print(json.dumps(health(), indent=2, ensure_ascii=False))
-    else:
+    if "--check" in sys.argv or len(sys.argv)==1:
         print(json.dumps(health(), indent=2, ensure_ascii=False))
