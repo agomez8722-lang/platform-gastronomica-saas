@@ -1,31 +1,28 @@
+version: '3.8'
 services:
-  backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app
+  db:
+    image: postgres:15
     environment:
-      - PYTHONUNBUFFERED=1
-  frontend:
-    image: node:20-alpine
-    working_dir: /app
+      POSTGRES_USER: gastro
+      POSTGRES_PASSWORD: gastro123
+      POSTGRES_DB: gastro_db
     ports:
-      - "3001:3001"
+      - "5432:5432"
     volumes:
-      - ./platform-gastronomica-saas:/app
-      - ./platform-gastronomica-saas/node_modules:/app/node_modules
-    command: sh -c "npm install --silent && npm run dev -- --host 0.0.0.0 --port 3001"
-  kds-front:
-    image: node:20-alpine
-    working_dir: /app
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./platform-gastronomica-saas:/app
-      - ./platform-gastronomica-saas/node_modules:/app/node_modules
-    command: sh -c "npx vite --host 0.0.0.0 --port 5173"
+      - pgdata:/var/lib/postgresql/data
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     ports:
       - "6379:6379"
+  api:
+    build:./backend
+    env_file:./backend/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+    volumes:
+      -./backend:/app
+volumes:
+  pgdata:
