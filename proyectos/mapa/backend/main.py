@@ -92,7 +92,7 @@ class MotorEvolutivoNivel10:
         resultado = _evaluar_reglas(registro, store)
         registrar_memoria_inmunologica(registro.get("ip"), resultado["anomalo"])
         return {
-            "nivel": 20,
+            "nivel": 21,
             "fitness": 300 if resultado["detectores"] >= 30 else 250 if resultado["detectores"] >=25 else 200 if resultado["detectores"] >=8 else 150,
             "detectores_dinamicos": resultado["detectores"],
             "genoma": genoma_actual(),
@@ -117,7 +117,7 @@ def health():
     except:
         detectores = 0
     fitness = 300 if detectores>=30 else 250 if detectores>=25 else 200 if detectores>=8 else 150
-    return {"nivel": 20, "fitness": fitness, "detectores_dinamicos": detectores, "genoma": genoma, "ips_bloqueadas": len(mem)}
+    return {"nivel": 21, "fitness": fitness, "detectores_dinamicos": detectores, "genoma": genoma, "ips_bloqueadas": len(mem)}
 
 if __name__ == "__main__":
     if "--init-db" in sys.argv:
