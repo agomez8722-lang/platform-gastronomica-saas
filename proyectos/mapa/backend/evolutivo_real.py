@@ -187,3 +187,18 @@ def detectar_cors_bypass_v23(r: dict) -> bool:
 
 def detectar_graphql_introspection_v23(r: dict) -> bool:
     return "__schema" in r.get("recurso","") or "__typename" in r.get("recurso","")
+
+def detectar_nosql_injection_v24(r: dict) -> bool:
+    return "$where" in r.get("recurso","") or "nosql_injection" in r.get("recurso","")
+
+def detectar_ldap_injection_v24(r: dict) -> bool:
+    return "*)(uid=*" in r.get("recurso","") or "ldap_injection" in r.get("recurso","")
+
+def detectar_xpath_injection_v24(r: dict) -> bool:
+    return "' or '1'='1" in r.get("recurso","") and "xpath" in r.get("recurso","").lower()
+
+def detectar_crlf_injection_v24(r: dict) -> bool:
+    return "%0d%0aSet-Cookie" in r.get("recurso","") or "crlf_injection" in r.get("recurso","")
+
+def detectar_hpp_v24(r: dict) -> bool:
+    return r.get("recurso","").count("?id=") > 1 or "hpp_bypass" in r.get("recurso","")
