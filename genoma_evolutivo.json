@@ -1,0 +1,18 @@
+{
+  "genoma": {
+    "umbral_bloqueo": 3,
+    "rate_limit_umbral": 8,
+    "rate_limit_ventana": 60
+  },
+  "fitness": 1.0,
+  "historial": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "timestamp": 1789527511.7104392,
+  "version": "15.0",
+  "changelog": []
+}
