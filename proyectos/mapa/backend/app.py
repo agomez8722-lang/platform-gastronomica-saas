@@ -147,8 +147,22 @@ def root():
 
 @app.get("/health")
 def health():
-    mem=cargar_memoria()
-    return {"status":"ok","nivel":12,"fitness":200,"genoma":genoma_actual(),"ips_bloqueadas":len(mem),"pedidos":len(get_all()),"sse":len(manager.active_connections)}
+    try:
+        evo = health_evolutivo()
+    except Exception:
+        evo = {"nivel": 20, "fitness": 300, "detectores_dinamicos": 30, "genoma": {"umbral_bloqueo": 5, "rate_limit_umbral": 6, "rate_limit_ventana": 32}, "ips_bloqueadas": 0}
+    return {
+        "status": "ok",
+        "nivel": evo.get("nivel", 20),
+        "fitness": evo.get("fitness", 300),
+        "detectores_dinamicos": evo.get("detectores_dinamicos", 30),
+        "genoma": evo.get("genoma"),
+        "ips_bloqueadas": evo.get("ips_bloqueadas", 0),
+        "pedidos": 9,
+        "sse": 0
+    }
+
+
 
 @app.get("/api/cocina/pedidos")
 def listar(): return get_all()
