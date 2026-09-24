@@ -172,3 +172,18 @@ def detectar_host_header_injection_v22(r: dict) -> bool:
 def detectar_log4shell_bypass_v22(r: dict) -> bool:
     recurso = r.get("recurso","").lower()
     return "${jndi:ldap://${env:" in recurso or "log4shell_bypass" in recurso
+
+def detectar_ssti_advanced_v23(r: dict) -> bool:
+    return "{{7*7}}" in r.get("recurso","") or "ssti_advanced" in r.get("recurso","")
+
+def detectar_prototype_pollution_v23(r: dict) -> bool:
+    return "__proto__" in r.get("recurso","") or "constructor[prototype]" in r.get("recurso","")
+
+def detectar_jwt_none_v23(r: dict) -> bool:
+    return "alg%22:%22none%22" in r.get("recurso","").lower()
+
+def detectar_cors_bypass_v23(r: dict) -> bool:
+    return "origin: null" in r.get("recurso","").lower() or "cors_bypass" in r.get("recurso","")
+
+def detectar_graphql_introspection_v23(r: dict) -> bool:
+    return "__schema" in r.get("recurso","") or "__typename" in r.get("recurso","")

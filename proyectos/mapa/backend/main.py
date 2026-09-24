@@ -67,7 +67,10 @@ def health():
         ast.parse(codigo)
         detectores=len([l for l in codigo.splitlines() if "def detectar_" in l])
     except: detectores=0
-    if detectores>=40:
+    if detectores>=45:
+        nivel=23
+        fitness=450
+    elif detectores>=40:
         nivel=22
         fitness=400
     elif detectores>=35:
