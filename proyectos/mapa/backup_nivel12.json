@@ -1,0 +1,12 @@
+{
+  "nivel": 12,
+  "fitness": 500,
+  "detectores_dinamicos": 20,
+  "genoma": {
+    "umbral_bloqueo": 5,
+    "rate_limit_umbral": 6,
+    "rate_limit_ventana": 32
+  },
+  "ips_bloqueadas": 0,
+  "ollama_disponible": false
+}
