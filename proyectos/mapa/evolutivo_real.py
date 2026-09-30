@@ -16,7 +16,8 @@ def detectar_brute_force_v10(r: Dict) -> bool:
     return "/admin" in r.get("recurso","") and r.get("rol") in ["user","guest",""]
 
 def detectar_rate_limit_v10(ip: str, store: Dict) -> bool:
-    if not ip or ip not in store: return False
+    if not ip or ip not in store:
+        return False
     recent = [t for t in store.get(ip,[]) if time.time() - t < 60]
     return len(recent) >= 8
 
@@ -25,7 +26,8 @@ def detectar_2fa_bypass_v10(r: Dict) -> bool:
 
 def detectar_sqli_v11(r: Dict) -> bool:
     payloads = ["' or '1'='1", "union select", "drop table", "' or 1=1", "--", ";--"]
-    return any(p in r.get("recurso","").lower() for p in payloads)
+    recurso = r.get("recurso","").lower()
+    return any(p in recurso for p in payloads)
 
 def detectar_path_traversal_v11(r: Dict) -> bool:
     recurso = r.get("recurso","").lower()
@@ -33,40 +35,56 @@ def detectar_path_traversal_v11(r: Dict) -> bool:
 
 def detectar_user_agent_v11(r: Dict) -> bool:
     maliciosos = ["sqlmap", "nikto", "nmap", "masscan", "dirbuster"]
-    return any(m in r.get("user_agent","").lower() for m in maliciosos)
+    ua = r.get("user_agent","").lower()
+    return any(m in ua for m in maliciosos)
 
-def detectar_xss_v11(r: Dict) -> bool:
-    return "<script" in r.get("recurso","").lower() or "onerror=" in r.get("recurso","").lower()
-
-def detectar_csrf_v11(r: Dict) -> bool:
-    return r.get("metodo","").upper() == "POST" and "/transfer" in r.get("recurso","").lower()
-
-def detectar_lfi_v11(r: Dict) -> bool:
-    return "file=" in r.get("recurso","").lower() and ".." in r.get("recurso","")
-
-def detectar_rfi_v11(r: Dict) -> bool:
-    return "http://" in r.get("recurso","").lower() and "url=" in r.get("recurso","").lower()
+def detectar_xss_v12(r: Dict) -> bool:
+    payloads = ["<script", "javascript:", "onerror=", "onload=", "<img", "alert("]
+    recurso = r.get("recurso","").lower()
+    return any(p in recurso for p in payloads)
 
 def detectar_command_injection_v12(r: Dict) -> bool:
-    return any(c in r.get("recurso","") for c in ["; ls", "| cat", "&& whoami", "`id`"])
+    payloads = ["; ls", "| cat", "&&", "`", "$(", "||", "; id"]
+    recurso = r.get("recurso","").lower()
+    return any(p in recurso for p in payloads)
+
+def detectar_lfi_v12(r: Dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "php://" in recurso or "file://" in recurso or "zip://" in recurso
+
+def detectar_rfi_v12(r: Dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "http://" in recurso and ("include" in recurso or "require" in recurso)
 
 def detectar_xxe_v12(r: Dict) -> bool:
-    return "<!ENTITY" in r.get("recurso","") or "<!DOCTYPE" in r.get("recurso","")
+    recurso = r.get("recurso","").lower()
+    return "<!entity" in recurso or "xxe" in recurso
 
 def detectar_ssrf_v12(r: Dict) -> bool:
-    return "169.254.169.254" in r.get("recurso","") or "metadata.google" in r.get("recurso","")
+    recurso = r.get("recurso","").lower()
+    return "169.254.169.254" in recurso or "metadata" in recurso
 
 def detectar_open_redirect_v12(r: Dict) -> bool:
-    return "redirect=" in r.get("recurso","").lower() and "http" in r.get("recurso","").lower()
-
-def detectar_file_upload_v12(r: Dict) -> bool:
-    return r.get("recurso","").lower().endswith((".php",".exe",".sh")) and r.get("metodo","") == "POST"
-
-def detectar_ldap_injection_v12(r: Dict) -> bool:
-    return "*)(uid=*" in r.get("recurso","") or ")(cn=" in r.get("recurso","")
-
-def detectar_ssti_v12(r: Dict) -> bool:
-    return "{{7*7}}" in r.get("recurso","") or "${7*7}" in r.get("recurso","")
+    recurso = r.get("recurso","").lower()
+    return "redirect" in recurso and ("//" in recurso or "http" in recurso)
 
 def detectar_idor_v12(r: Dict) -> bool:
-    return "/api/user/" in r.get("recurso","") and r.get("rol") == "user"
+    recurso = r.get("recurso","").lower()
+    return "/user/" in recurso and r.get("rol") == "user" and "id=" in recurso
+
+def detectar_csrf_v12(r: Dict) -> bool:
+    return r.get("method","GET").upper() == "POST" and "/transfer" in r.get("recurso","").lower() and not r.get("csrf_token")
+
+def detectar_file_upload_v12(r: Dict) -> bool:
+    recurso = r.get("recurso","").lower()
+    return "/upload" in recurso and any(ext in recurso for ext in [".php", ".exe", ".sh", ".jsp"])
+
+def detectar_ldap_injection_v12(r: Dict) -> bool:
+    payloads = ["*()","*)(|", ")(cn=", "admin*)"]
+    recurso = r.get("recurso","").lower()
+    return any(p in recurso for p in payloads)
+
+def detectar_nosql_injection_v12(r: Dict) -> bool:
+    payloads = ["$ne", "$gt", "$where", "[$"]
+    recurso = r.get("recurso","").lower()
+    return any(p in recurso for p in payloads) and "/api/" in recurso
